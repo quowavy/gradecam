@@ -1,0 +1,2933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GradeCam</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0a; --surface: #111; --surface2: #1a1a1a;
+  --border: #222; --text: #e0e0e0; --text-dim: #666;
+  --accent: #4a9eff; --green: #4ade80; --red: #f87171;
+  --orange: #fb923c; --purple: #a78bfa;
+  --sheet-height: 44vh;
+}
+body { background: var(--bg); color: var(--text); font-family: -apple-system, 'SF Pro', system-ui, sans-serif; overflow: hidden; height: 100dvh; display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: var(--bg); flex-shrink: 0; height: 36px; }
+.topbar h1 { font-size: 12px; font-weight: 700; font-family: 'SF Mono', monospace; letter-spacing: 2px; color: var(--text-dim); }
+.topbar button { background: none; border: none; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 8px; }
+.topbar .import-btn { color: var(--accent); }
+.topbar .export-btn { color: var(--green); }
+.topbar button:disabled { color: #333; }
+
+.video-container { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; position: relative; min-height: 0; overflow: hidden; }
+.video-container video { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+.video-container canvas { position: absolute; max-width: 100%; max-height: 100%; object-fit: contain; }
+#maskCanvas { z-index: 2; pointer-events: none; }
+#maskCanvas.active { pointer-events: auto; cursor: crosshair; }
+#maskCanvas.roto { pointer-events: auto; cursor: cell; }
+#glCanvas { z-index: 1; }
+.empty-state { text-align: center; color: #333; z-index: 3; }
+.empty-state .icon { font-size: 40px; margin-bottom: 8px; }
+.empty-state p { font-size: 13px; }
+.original-badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #facc15; font-size: 9px; font-weight: 700; font-family: monospace; padding: 3px 6px; border-radius: 3px; display: none; z-index: 5; }
+.mask-badge { position: absolute; top: 8px; right: 8px; background: rgba(167,139,250,0.8); color: white; font-size: 9px; font-weight: 700; font-family: monospace; padding: 3px 6px; border-radius: 3px; display: none; z-index: 5; }
+
+.transport { position: absolute; bottom: 38px; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.85)); padding: 10px 12px 8px; z-index: 4; }
+.transport input[type=range] { width: 100%; height: 6px; accent-color: white; margin: 0; padding: 8px 0; }
+.transport-row { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+.timecode { font-size: 9px; font-family: 'SF Mono', monospace; color: rgba(255,255,255,0.5); }
+.transport-controls { display: flex; gap: 20px; align-items: center; }
+.transport-controls button { background: none; border: none; color: rgba(255,255,255,0.9); font-size: 22px; cursor: pointer; padding: 6px; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+
+.bottom-sheet { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-radius: 12px 12px 0 0; transform: translateY(calc(var(--sheet-height) - 32px)); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 50; touch-action: none; }
+.bottom-sheet.expanded { transform: translateY(0); }
+.bottom-sheet.dragging { transition: none; }
+
+.sheet-handle { display: flex; align-items: center; justify-content: center; padding: 8px 0 4px; cursor: grab; }
+.sheet-handle .pill { width: 32px; height: 3px; background: #444; border-radius: 2px; }
+
+.tabs { display: flex; padding: 0 2px; gap: 0; flex-shrink: 0; overflow-x: auto; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: 0 0 auto; padding: 6px 8px; background: none; border: none; color: var(--text-dim); font-size: 9px; font-weight: 600; cursor: pointer; text-align: center; border-bottom: 2px solid transparent; transition: color 0.15s; white-space: nowrap; }
+.tabs button.active { color: white; border-bottom-color: white; }
+
+.controls { overflow-y: auto; height: calc(var(--sheet-height) - 62px); padding: 4px 0 env(safe-area-inset-bottom); }
+.controls::-webkit-scrollbar { width: 0; }
+
+.slider-row { display: flex; align-items: center; padding: 3px 14px; gap: 8px; }
+.slider-row label { font-size: 10px; color: var(--text-dim); width: 72px; flex-shrink: 0; font-weight: 500; }
+.slider-row input[type=range] { flex: 1; height: 3px; accent-color: white; }
+.slider-row .value { font-size: 10px; font-family: 'SF Mono', monospace; color: #aaa; width: 40px; text-align: right; flex-shrink: 0; }
+.divider { height: 1px; background: var(--border); margin: 4px 14px; }
+.section-label { font-size: 9px; font-weight: 700; color: var(--text-dim); padding: 6px 14px 2px; font-family: monospace; letter-spacing: 1px; }
+
+.curves-panel { padding: 6px 14px; }
+.channel-selector { display: flex; gap: 0; margin-bottom: 6px; border-radius: 6px; overflow: hidden; background: var(--surface2); }
+.channel-selector button { flex: 1; padding: 5px; font-size: 10px; font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; }
+.channel-selector button.active { background: rgba(255,255,255,0.08); }
+.channel-selector button[data-ch="master"].active { color: white; }
+.channel-selector button[data-ch="red"].active { color: #f87171; }
+.channel-selector button[data-ch="green"].active { color: #4ade80; }
+.channel-selector button[data-ch="blue"].active { color: #60a5fa; }
+.curve-canvas { width: 100%; aspect-ratio: 1.2; background: #000; border: 1px solid var(--border); border-radius: 4px; cursor: crosshair; touch-action: none; }
+
+.wheels-row { display: flex; gap: 8px; padding: 6px 10px; }
+.wheel-container { flex: 1; text-align: center; }
+.wheel-container .label { font-size: 9px; font-weight: 700; font-family: monospace; color: var(--text-dim); margin-bottom: 2px; }
+.wheel-canvas { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; touch-action: none; }
+.wheel-container input[type=range] { width: 100%; margin-top: 2px; accent-color: white; height: 3px; }
+.wheel-container .master-val { font-size: 8px; font-family: monospace; color: var(--text-dim); }
+
+.lut-panel { padding: 14px; text-align: center; }
+.lut-panel .lut-icon { font-size: 28px; margin-bottom: 6px; }
+.lut-panel .lut-name { font-size: 12px; font-weight: 500; margin-bottom: 2px; }
+.lut-panel .lut-status { font-size: 10px; color: var(--text-dim); margin-bottom: 10px; }
+.lut-panel .import-btn { background: rgba(74,158,255,0.15); color: var(--accent); border: none; padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; }
+.lut-panel .remove-btn { background: none; border: none; color: var(--red); font-size: 11px; cursor: pointer; margin-top: 6px; opacity: 0.7; }
+
+/* HSL hue strip */
+.hue-strip { height: 20px; margin: 6px 14px; border-radius: 4px; background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); position: relative; cursor: pointer; touch-action: none; }
+.hue-range-indicator { position: absolute; top: 0; height: 100%; background: rgba(255,255,255,0.25); border: 1px solid rgba(255,255,255,0.5); border-radius: 4px; pointer-events: none; }
+.toggle-row { display: flex; align-items: center; padding: 4px 14px; gap: 8px; }
+.toggle-row label { font-size: 10px; color: var(--text-dim); flex: 1; font-weight: 500; }
+.toggle-row button { background: rgba(255,255,255,0.1); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; font-weight: 600; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+.toggle-row button.on { background: rgba(167,139,250,0.3); border-color: var(--purple); color: var(--purple); }
+
+/* Mask panel */
+.mask-tools { display: flex; gap: 6px; padding: 6px 14px; }
+.mask-tools button { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; font-weight: 600; padding: 6px 4px; border-radius: 6px; cursor: pointer; }
+.mask-tools button.active { background: rgba(167,139,250,0.2); border-color: var(--purple); color: var(--purple); }
+.mask-info { font-size: 9px; color: var(--text-dim); padding: 4px 14px; text-align: center; }
+
+/* Presets */
+.presets-panel { padding: 8px 14px; }
+.preset-categories { display: flex; gap: 0; overflow-x: auto; margin-bottom: 8px; border-radius: 6px; background: var(--surface2); flex-shrink: 0; }
+.preset-categories::-webkit-scrollbar { display: none; }
+.preset-categories button { flex: 0 0 auto; padding: 5px 10px; font-size: 9px; font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.preset-categories button.active { background: rgba(255,255,255,0.08); color: white; }
+.preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px; max-height: calc(var(--sheet-height) - 140px); overflow-y: auto; }
+.preset-grid::-webkit-scrollbar { width: 0; }
+.preset-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; cursor: pointer; position: relative; }
+.preset-item .name { font-size: 10px; font-weight: 600; line-height: 1.2; }
+.preset-item .meta { font-size: 8px; color: var(--text-dim); margin-top: 1px; }
+.preset-item .gauge { font-size: 7px; color: var(--orange); margin-top: 1px; font-family: monospace; }
+.preset-item .delete-preset { position: absolute; top: 3px; right: 5px; background: none; border: none; color: var(--red); font-size: 11px; cursor: pointer; opacity: 0.5; }
+.preset-save-row { display: flex; gap: 6px; }
+.preset-save-row input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: white; font-size: 11px; padding: 6px 8px; border-radius: 6px; outline: none; }
+.preset-save-row button { background: rgba(74,222,128,0.15); color: var(--green); border: none; padding: 6px 14px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; }
+
+.reset-bar { padding: 4px; text-align: center; flex-shrink: 0; }
+.reset-bar button { background: none; border: none; color: var(--text-dim); font-size: 10px; cursor: pointer; }
+
+.export-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 100; flex-direction: column; gap: 10px; }
+.export-overlay.show { display: flex; }
+.export-overlay .progress-bar { width: 180px; height: 3px; background: #333; border-radius: 2px; overflow: hidden; }
+.export-overlay .progress-fill { height: 100%; background: var(--green); width: 0%; transition: width 0.3s; }
+.export-overlay p { font-size: 12px; color: var(--green); font-family: monospace; }
+.export-overlay .cancel-btn { background: none; border: 1px solid #666; color: #999; font-size: 11px; padding: 6px 16px; border-radius: 6px; cursor: pointer; margin-top: 8px; }
+
+.export-format-sheet { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-radius: 16px 16px 0 0; z-index: 110; transform: translateY(100%); transition: transform 0.3s; padding: 16px; padding-bottom: env(safe-area-inset-bottom, 16px); }
+.export-format-sheet.show { transform: translateY(0); }
+.export-format-sheet .drag-handle { width: 36px; height: 4px; background: #444; border-radius: 2px; margin: 0 auto 12px; }
+.export-format-sheet h3 { font-size: 14px; font-weight: 700; margin-bottom: 12px; text-align: center; }
+.export-format-sheet .format-option { display: flex; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 6px; cursor: pointer; background: var(--surface2); }
+.export-format-sheet .format-option.selected { background: rgba(74,158,255,0.15); border: 1px solid var(--accent); }
+.export-format-sheet .format-option:not(.selected) { border: 1px solid transparent; }
+.export-format-sheet .format-option .fmt-name { font-size: 13px; font-weight: 600; }
+.export-format-sheet .format-option .fmt-desc { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.export-format-sheet .format-option .fmt-check { margin-left: auto; color: var(--accent); font-size: 16px; }
+.export-format-sheet .export-confirm { width: 100%; padding: 12px; border: none; border-radius: 8px; background: var(--green); color: #000; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+.export-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 109; display: none; }
+.export-backdrop.show { display: block; }
+
+.hidden { display: none !important; }
+
+/* Layers Panel */
+.layers-panel { padding: 6px 10px; }
+.layers-add-btn { width: 100%; padding: 8px; background: rgba(74,158,255,0.12); color: var(--accent); border: 1px solid rgba(74,158,255,0.25); border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; margin-bottom: 6px; }
+.layers-list { display: flex; flex-direction: column; gap: 3px; max-height: calc(var(--sheet-height) - 140px); overflow-y: auto; }
+.layers-list::-webkit-scrollbar { width: 0; }
+.layer-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; min-height: 40px; }
+.layer-row.active { border-color: var(--accent); background: rgba(74,158,255,0.08); }
+.layer-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+.layer-row.active .layer-dot { background: var(--accent); }
+.layer-name { flex: 1; font-size: 11px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-name-input { background: var(--bg); border: 1px solid var(--accent); color: white; font-size: 11px; padding: 2px 4px; border-radius: 3px; width: 100%; outline: none; }
+.layer-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; font-weight: 700; width: 26px; height: 26px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.layer-btn.on { background: rgba(74,158,255,0.2); border-color: var(--accent); color: var(--accent); }
+.layer-btn.solo.on { background: rgba(251,146,60,0.2); border-color: var(--orange); color: var(--orange); }
+.layer-btn.eye.off { color: #333; border-color: #1a1a1a; }
+.layer-opacity { width: 40px; height: 3px; accent-color: white; flex-shrink: 0; }
+.layer-opacity-val { font-size: 8px; font-family: monospace; color: var(--text-dim); width: 24px; text-align: right; flex-shrink: 0; }
+.layer-arrows { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
+.layer-arrows button { background: none; border: none; color: var(--text-dim); font-size: 8px; cursor: pointer; padding: 0; line-height: 1; }
+.layer-delete { background: none; border: none; color: var(--red); font-size: 12px; cursor: pointer; opacity: 0.4; flex-shrink: 0; padding: 0 2px; }
+.layer-badge { font-size: 8px; font-weight: 700; font-family: monospace; color: var(--accent); background: rgba(74,158,255,0.1); padding: 2px 6px; border-radius: 3px; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="import-btn" id="importBtn">Import</button>
+  <div style="display:flex;gap:2px;align-items:center">
+    <button id="undoBtn" style="color:var(--text-dim);font-size:16px;padding:4px 6px" disabled>↩</button>
+    <h1>GRADECAM</h1><span class="layer-badge" id="layerBadge">Primary</span>
+    <button id="redoBtn" style="color:var(--text-dim);font-size:16px;padding:4px 6px" disabled>↪</button>
+  </div>
+  <button id="exportBtn" class="export-btn" disabled>Export</button>
+</div>
+
+<div class="video-container" id="videoContainer">
+  <video id="sourceVideo" playsinline muted></video>
+  <canvas id="glCanvas"></canvas>
+  <canvas id="maskCanvas"></canvas>
+  <div class="empty-state" id="emptyState">
+    <div class="icon">🎬</div>
+    <p>Import a video to start grading</p>
+  </div>
+  <div class="original-badge" id="originalBadge">ORIGINAL</div>
+  <div class="mask-badge" id="maskBadge">MASK</div>
+  <div class="transport hidden" id="transportBar">
+    <input type="range" id="scrubber" min="0" max="100" step="0.1" value="0">
+    <div class="transport-row">
+      <span class="timecode" id="currentTime">00:00:00:00</span>
+      <div class="transport-controls">
+        <button id="stepBack">⏮</button>
+        <button id="playPause">▶</button>
+        <button id="stepFwd">⏭</button>
+      </div>
+      <span class="timecode" id="duration">00:00:00:00</span>
+    </div>
+  </div>
+</div>
+
+<div class="bottom-sheet" id="bottomSheet">
+  <div class="sheet-handle" id="sheetHandle"><div class="pill"></div></div>
+
+  <div class="tabs" id="tabBar">
+    <button class="active" data-tab="basic">Basic</button>
+    <button data-tab="curves">Curves</button>
+    <button data-tab="wheels">Wheels</button>
+    <button data-tab="hsl">HSL</button>
+    <button data-tab="fx">FX</button>
+    <button data-tab="mask">Mask</button>
+    <button data-tab="layers">Layers</button>
+    <button data-tab="lut">LUT</button>
+    <button data-tab="presets">Presets</button>
+  </div>
+
+  <div class="controls" id="controlsPanel">
+    <!-- Basic -->
+    <div id="panel-basic">
+      <div class="slider-row"><label>Temperature</label><input type="range" min="-100" max="100" value="0" data-param="temperature"><span class="value">0</span></div>
+      <div class="slider-row"><label>Tint</label><input type="range" min="-100" max="100" value="0" data-param="tint"><span class="value">0</span></div>
+      <div class="divider"></div>
+      <div class="slider-row"><label>Exposure</label><input type="range" min="-500" max="500" value="0" data-param="exposure" data-scale="0.01"><span class="value">0.00</span></div>
+      <div class="slider-row"><label>Contrast</label><input type="range" min="-100" max="100" value="0" data-param="contrast"><span class="value">0</span></div>
+      <div class="divider"></div>
+      <div class="slider-row"><label>Highlights</label><input type="range" min="-100" max="100" value="0" data-param="highlights"><span class="value">0</span></div>
+      <div class="slider-row"><label>Shadows</label><input type="range" min="-100" max="100" value="0" data-param="shadows"><span class="value">0</span></div>
+      <div class="slider-row"><label>Whites</label><input type="range" min="-100" max="100" value="0" data-param="whites"><span class="value">0</span></div>
+      <div class="slider-row"><label>Blacks</label><input type="range" min="-100" max="100" value="0" data-param="blacks"><span class="value">0</span></div>
+      <div class="divider"></div>
+      <div class="slider-row"><label>Saturation</label><input type="range" min="0" max="200" value="100" data-param="saturation"><span class="value">100</span></div>
+      <div class="slider-row"><label>Vibrance</label><input type="range" min="-100" max="100" value="0" data-param="vibrance"><span class="value">0</span></div>
+    </div>
+
+    <!-- Curves -->
+    <div id="panel-curves" class="hidden">
+      <div class="curves-panel">
+        <div class="channel-selector">
+          <button data-ch="master" class="active">Master</button>
+          <button data-ch="red">Red</button>
+          <button data-ch="green">Green</button>
+          <button data-ch="blue">Blue</button>
+        </div>
+        <canvas class="curve-canvas" id="curveCanvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Wheels -->
+    <div id="panel-wheels" class="hidden">
+      <div class="wheels-row">
+        <div class="wheel-container">
+          <div class="label">LIFT</div>
+          <canvas class="wheel-canvas" id="wheelLift"></canvas>
+          <input type="range" min="-100" max="100" value="0" data-wheel="lift-master">
+          <div class="master-val" id="liftVal">0.00</div>
+        </div>
+        <div class="wheel-container">
+          <div class="label">GAMMA</div>
+          <canvas class="wheel-canvas" id="wheelGamma"></canvas>
+          <input type="range" min="-100" max="100" value="0" data-wheel="gamma-master">
+          <div class="master-val" id="gammaVal">0.00</div>
+        </div>
+        <div class="wheel-container">
+          <div class="label">GAIN</div>
+          <canvas class="wheel-canvas" id="wheelGain"></canvas>
+          <input type="range" min="-100" max="100" value="0" data-wheel="gain-master">
+          <div class="master-val" id="gainVal">0.00</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HSL Secondary -->
+    <div id="panel-hsl" class="hidden">
+      <div class="section-label">HUE RANGE</div>
+      <div class="hue-strip" id="hueStrip"><div class="hue-range-indicator" id="hueIndicator"></div></div>
+      <div class="slider-row"><label>Hue Center</label><input type="range" min="0" max="360" value="0" data-hsl="hslHueCenter"><span class="value">0°</span></div>
+      <div class="slider-row"><label>Hue Width</label><input type="range" min="0" max="180" value="30" data-hsl="hslHueWidth"><span class="value">30°</span></div>
+      <div class="slider-row"><label>Softness</label><input type="range" min="0" max="100" value="20" data-hsl="hslSoftness"><span class="value">20</span></div>
+      <div class="divider"></div>
+      <div class="section-label">SAT / LUM RANGE</div>
+      <div class="slider-row"><label>Sat Min</label><input type="range" min="0" max="100" value="0" data-hsl="hslSatMin"><span class="value">0</span></div>
+      <div class="slider-row"><label>Sat Max</label><input type="range" min="0" max="100" value="100" data-hsl="hslSatMax"><span class="value">100</span></div>
+      <div class="slider-row"><label>Lum Min</label><input type="range" min="0" max="100" value="0" data-hsl="hslLumMin"><span class="value">0</span></div>
+      <div class="slider-row"><label>Lum Max</label><input type="range" min="0" max="100" value="100" data-hsl="hslLumMax"><span class="value">100</span></div>
+      <div class="divider"></div>
+      <div class="section-label">ADJUSTMENTS</div>
+      <div class="slider-row"><label>Hue Shift</label><input type="range" min="-180" max="180" value="0" data-hsl="hslHueShift"><span class="value">0°</span></div>
+      <div class="slider-row"><label>Sat Adjust</label><input type="range" min="-100" max="100" value="0" data-hsl="hslSatAdjust"><span class="value">0</span></div>
+      <div class="slider-row"><label>Lum Adjust</label><input type="range" min="-100" max="100" value="0" data-hsl="hslLumAdjust"><span class="value">0</span></div>
+      <div class="divider"></div>
+      <div class="toggle-row"><label>Show Qualifier Mask</label><button id="hslMaskToggle">OFF</button></div>
+    </div>
+
+    <!-- FX -->
+    <div id="panel-fx" class="hidden">
+      <div class="section-label">SPLIT TONING</div>
+      <div class="slider-row"><label>Shadow Hue</label><input type="range" min="0" max="360" value="220" data-fx="splitShadowHue"><span class="value">220°</span></div>
+      <div class="slider-row"><label>Shadow Sat</label><input type="range" min="0" max="100" value="0" data-fx="splitShadowSat"><span class="value">0</span></div>
+      <div class="slider-row"><label>Highlight Hue</label><input type="range" min="0" max="360" value="40" data-fx="splitHighlightHue"><span class="value">40°</span></div>
+      <div class="slider-row"><label>Highlight Sat</label><input type="range" min="0" max="100" value="0" data-fx="splitHighlightSat"><span class="value">0</span></div>
+      <div class="slider-row"><label>Balance</label><input type="range" min="-100" max="100" value="0" data-fx="splitBalance"><span class="value">0</span></div>
+      <div class="divider"></div>
+      <div class="section-label">VIGNETTE</div>
+      <div class="slider-row"><label>Amount</label><input type="range" min="-100" max="100" value="0" data-fx="vignetteAmount"><span class="value">0</span></div>
+      <div class="slider-row"><label>Midpoint</label><input type="range" min="0" max="100" value="50" data-fx="vignetteMidpoint"><span class="value">50</span></div>
+      <div class="slider-row"><label>Roundness</label><input type="range" min="0" max="100" value="50" data-fx="vignetteRoundness"><span class="value">50</span></div>
+      <div class="slider-row"><label>Feather</label><input type="range" min="0" max="100" value="50" data-fx="vignetteFeather"><span class="value">50</span></div>
+      <div class="divider"></div>
+      <div class="section-label">FILM GRAIN</div>
+      <div class="slider-row"><label>Amount</label><input type="range" min="0" max="100" value="0" data-fx="grainAmount"><span class="value">0</span></div>
+      <div class="slider-row"><label>Size</label><input type="range" min="50" max="300" value="100" data-fx="grainSize"><span class="value">1.0</span></div>
+      <div class="divider"></div>
+      <div class="section-label">SHARPEN</div>
+      <div class="slider-row"><label>Amount</label><input type="range" min="0" max="200" value="0" data-fx="sharpenAmount"><span class="value">0</span></div>
+      <div class="slider-row"><label>Radius</label><input type="range" min="50" max="300" value="100" data-fx="sharpenRadius"><span class="value">1.0</span></div>
+    </div>
+
+    <!-- Mask -->
+    <div id="panel-mask" class="hidden">
+      <div class="section-label">AUTO ROTO</div>
+      <div class="mask-tools">
+        <button id="maskAutoRoto">✦ Tap Subject</button>
+        <button id="maskAddPoint">+ Add</button>
+        <button id="maskSubPoint">− Sub</button>
+      </div>
+      <div class="slider-row"><label>Threshold</label><input type="range" min="5" max="80" value="30" data-mask="rotoThreshold"><span class="value">30</span></div>
+      <div class="slider-row"><label>Edge Sense</label><input type="range" min="0" max="100" value="60" data-mask="rotoEdgeSense"><span class="value">60</span></div>
+      <div class="slider-row"><label>Feather</label><input type="range" min="0" max="100" value="20" data-mask="maskFeather"><span class="value">20</span></div>
+      <div class="mask-info" id="rotoStatus">Tap a subject on the video to auto-mask it</div>
+      <div class="divider"></div>
+      <div class="section-label">SHAPE MASK</div>
+      <div class="mask-tools">
+        <button id="maskEllipse">⬭ Ellipse</button>
+        <button id="maskRect">▭ Rectangle</button>
+      </div>
+      <div class="divider"></div>
+      <div class="section-label">TRACKING</div>
+      <div class="mask-tools">
+        <button id="trackForward">▶ Track Fwd</button>
+        <button id="trackBackward">◀ Track Back</button>
+        <button id="maskClear">✕ Clear</button>
+      </div>
+      <div class="mask-info" id="trackStatus">Create a mask, then track across frames</div>
+      <div class="divider"></div>
+      <div class="slider-row"><label>Invert</label><input type="range" min="0" max="1" value="0" data-mask="maskInvert"><span class="value">Off</span></div>
+      <div class="toggle-row"><label>Show Mask Overlay</label><button id="maskOverlayToggle">OFF</button></div>
+    </div>
+
+    <!-- Layers -->
+    <div id="panel-layers" class="hidden">
+      <div class="layers-panel">
+        <button class="layers-add-btn" id="addLayerBtn">+ Add Layer</button>
+        <div class="layers-list" id="layersList"></div>
+      </div>
+    </div>
+
+    <!-- LUT -->
+    <div id="panel-lut" class="hidden">
+      <div class="lut-panel">
+        <div class="lut-icon" id="lutIcon">📦</div>
+        <div class="lut-name" id="lutName">No LUT loaded</div>
+        <div class="lut-status" id="lutStatus">Import a .cube LUT file</div>
+        <button class="import-btn" id="lutImportBtn">Import .cube LUT</button>
+        <div class="slider-row hidden" id="lutIntensityRow" style="margin-top:10px">
+          <label>Intensity</label>
+          <input type="range" min="0" max="100" value="100" data-param="lutIntensity" data-scale="0.01">
+          <span class="value">100%</span>
+        </div>
+        <button class="remove-btn hidden" id="lutRemoveBtn">Remove LUT</button>
+      </div>
+    </div>
+
+    <!-- Presets -->
+    <div id="panel-presets" class="hidden">
+      <div class="presets-panel">
+        <div class="preset-categories" id="presetCategories"></div>
+        <div class="preset-grid" id="presetGrid"></div>
+        <div class="preset-save-row">
+          <input type="text" id="presetNameInput" placeholder="Preset name...">
+          <button id="presetSaveBtn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="reset-bar"><button id="resetBtn">Reset All</button></div>
+</div>
+
+<div class="export-backdrop" id="exportBackdrop"></div>
+<div class="export-format-sheet" id="exportFormatSheet">
+  <div class="drag-handle"></div>
+  <h3>Export Format</h3>
+  <div class="format-option selected" data-format="mp4-high">
+    <div><div class="fmt-name">H.264 High Quality</div><div class="fmt-desc">~50 Mbps · .mp4 · Best compatibility</div></div>
+    <div class="fmt-check">✓</div>
+  </div>
+  <div class="format-option" data-format="mp4-standard">
+    <div><div class="fmt-name">H.264 Standard</div><div class="fmt-desc">~20 Mbps · .mp4 · Smaller file</div></div>
+    <div class="fmt-check" style="display:none">✓</div>
+  </div>
+  <div class="format-option" data-format="webm-high">
+    <div><div class="fmt-name">WebM VP9</div><div class="fmt-desc">~20 Mbps · .webm · Web optimized</div></div>
+    <div class="fmt-check" style="display:none">✓</div>
+  </div>
+  <button class="export-confirm" id="exportConfirmBtn">Export</button>
+</div>
+
+<div class="export-overlay" id="exportOverlay">
+  <div class="progress-bar"><div class="progress-fill" id="exportProgress"></div></div>
+  <p id="exportText">Exporting... 0%</p>
+  <button class="cancel-btn" id="exportCancelBtn">Cancel</button>
+</div>
+
+<input type="file" id="videoInput" accept="video/*" style="display:none">
+<input type="file" id="lutInput" accept=".cube" style="display:none">
+
+<script>
+// ═══════════════════════════════════════════
+// Bottom Sheet
+// ═══════════════════════════════════════════
+const sheet = document.getElementById('bottomSheet');
+const handle = document.getElementById('sheetHandle');
+let sheetExpanded = false, sheetStartY = 0, sheetDragY = 0, sheetDragging = false;
+
+handle.addEventListener('pointerdown', (e) => { sheetDragging = true; sheetStartY = e.clientY; sheet.classList.add('dragging'); handle.setPointerCapture(e.pointerId); });
+handle.addEventListener('pointermove', (e) => {
+  if (!sheetDragging) return;
+  sheetDragY = e.clientY - sheetStartY;
+  if (sheetExpanded) sheet.style.transform = `translateY(${Math.max(0, sheetDragY)}px)`;
+  else sheet.style.transform = `translateY(${Math.max(0, sheet.offsetHeight - 32 + sheetDragY)}px)`;
+});
+handle.addEventListener('pointerup', () => {
+  sheetDragging = false; sheet.classList.remove('dragging'); sheet.style.transform = '';
+  if (sheetExpanded && sheetDragY > 40) { sheetExpanded = false; sheet.classList.remove('expanded'); }
+  else if (!sheetExpanded && sheetDragY < -40) { sheetExpanded = true; sheet.classList.add('expanded'); }
+});
+handle.addEventListener('click', () => { if (Math.abs(sheetDragY) < 5) { sheetExpanded = !sheetExpanded; sheet.classList.toggle('expanded', sheetExpanded); } });
+document.querySelectorAll('.tabs button').forEach(btn => btn.addEventListener('click', () => { if (!sheetExpanded) { sheetExpanded = true; sheet.classList.add('expanded'); } }));
+
+// ═══════════════════════════════════════════
+// Shader
+// ═══════════════════════════════════════════
+const vertSrc = `attribute vec2 a_pos; attribute vec2 a_uv; varying vec2 v_uv; void main() { gl_Position = vec4(a_pos, 0.0, 1.0); v_uv = a_uv; }`;
+
+const fragSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_video, u_curveLUT, u_lut3d, u_maskTex;
+uniform float u_temperature, u_tint, u_exposure, u_contrast;
+uniform float u_highlights, u_shadows, u_whites, u_blacks;
+uniform float u_saturation, u_vibrance;
+uniform vec3 u_lift, u_gamma, u_gain;
+uniform float u_liftMaster, u_gammaMaster, u_gainMaster;
+uniform float u_lutIntensity, u_lutEnabled, u_lutSize, u_showOriginal;
+// HSL
+uniform float u_hslHueCenter, u_hslHueWidth, u_hslSoftness;
+uniform float u_hslSatMin, u_hslSatMax, u_hslLumMin, u_hslLumMax;
+uniform float u_hslHueShift, u_hslSatAdjust, u_hslLumAdjust, u_hslShowMask;
+// FX
+uniform float u_splitShadowHue, u_splitShadowSat, u_splitHighlightHue, u_splitHighlightSat, u_splitBalance;
+uniform float u_vignetteAmount, u_vignetteMidpoint, u_vignetteRoundness, u_vignetteFeather;
+uniform float u_grainAmount, u_grainSize, u_time;
+uniform float u_sharpenAmount, u_sharpenRadius;
+uniform vec2 u_resolution;
+// Mask
+uniform float u_maskEnabled, u_maskShowOverlay, u_layerOpacity;
+
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 srgbToLinear(vec3 c) { return mix(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, step(c, vec3(0.04045))); }
+vec3 linearToSrgb(vec3 c) { return mix(1.055 * pow(c, vec3(1.0/2.4)) - 0.055, c * 12.92, step(c, vec3(0.0031308))); }
+
+vec3 rgbToHsl(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+  float l = (mx + mn) * 0.5, d = mx - mn, s = 0.0, h = 0.0;
+  if (d > 1e-5) {
+    s = l > 0.5 ? d / (2.0 - mx - mn) : d / (mx + mn);
+    if (mx == c.r) h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+    else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+    else h = (c.r - c.g) / d + 4.0;
+    h /= 6.0;
+  }
+  return vec3(h, s, l);
+}
+float hue2rgb(float p, float q, float t) { float tt = t < 0.0 ? t + 1.0 : (t > 1.0 ? t - 1.0 : t); if (tt < 1.0/6.0) return p + (q-p)*6.0*tt; if (tt < 0.5) return q; if (tt < 2.0/3.0) return p + (q-p)*(2.0/3.0-tt)*6.0; return p; }
+vec3 hslToRgb(vec3 hsl) { if (hsl.y < 1e-5) return vec3(hsl.z); float q = hsl.z < 0.5 ? hsl.z*(1.0+hsl.y) : hsl.z+hsl.y-hsl.z*hsl.y; float p = 2.0*hsl.z - q; return vec3(hue2rgb(p,q,hsl.x+1.0/3.0), hue2rgb(p,q,hsl.x), hue2rgb(p,q,hsl.x-1.0/3.0)); }
+
+vec3 sampleLUT(vec3 color) {
+  float size = u_lutSize; vec3 c = clamp(color, 0.0, 1.0) * (size - 1.0);
+  float bFloor = floor(c.b), bCeil = min(bFloor + 1.0, size - 1.0), t = c.b - bFloor;
+  vec2 uv1 = vec2((bFloor * size + c.r + 0.5) / (size * size), (c.g + 0.5) / size);
+  vec2 uv2 = vec2((bCeil * size + c.r + 0.5) / (size * size), (c.g + 0.5) / size);
+  return mix(texture2D(u_lut3d, uv1).rgb, texture2D(u_lut3d, uv2).rgb, t);
+}
+
+// Hash for grain
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+void main() {
+  vec2 uv = v_uv;
+  vec3 c = texture2D(u_video, uv).rgb;
+  vec3 original = c;
+  if (u_showOriginal > 0.5) { gl_FragColor = vec4(c, 1.0); return; }
+
+  // Sharpen (unsharp mask)
+  if (u_sharpenAmount > 0.001) {
+    vec2 px = u_sharpenRadius / u_resolution;
+    vec3 blur = texture2D(u_video, uv + vec2(-px.x, 0.0)).rgb
+              + texture2D(u_video, uv + vec2(px.x, 0.0)).rgb
+              + texture2D(u_video, uv + vec2(0.0, -px.y)).rgb
+              + texture2D(u_video, uv + vec2(0.0, px.y)).rgb;
+    blur *= 0.25;
+    c = c + (c - blur) * u_sharpenAmount;
+  }
+
+  c = srgbToLinear(clamp(c, 0.0, 1.0));
+
+  // White balance
+  c.r *= 1.0 + u_temperature * 0.3;
+  c.b *= 1.0 - u_temperature * 0.3;
+  c.g *= 1.0 + u_tint * 0.1;
+  c *= pow(2.0, u_exposure);
+  if (abs(u_contrast) > 0.001) c = 0.18 * pow(c / 0.18, vec3(1.0 + u_contrast));
+
+  float lum = luminance(c);
+  c += c * u_highlights * smoothstep(0.3, 0.7, lum) * 0.5;
+  c += c * u_shadows * (1.0 - smoothstep(0.0, 0.5, lum)) * 0.5;
+  c += c * u_whites * smoothstep(0.6, 1.0, lum) * 0.3;
+  c += u_blacks * (1.0 - smoothstep(0.0, 0.3, lum)) * 0.1;
+
+  vec3 hsl = rgbToHsl(linearToSrgb(clamp(c, 0.0, 1.0)));
+  hsl.y *= u_saturation;
+  if (abs(u_vibrance) > 0.001) hsl.y = clamp(hsl.y + u_vibrance * (1.0 - hsl.y) * 0.5, 0.0, 1.0);
+  c = srgbToLinear(hslToRgb(hsl));
+
+  // Wheels
+  lum = luminance(clamp(c, 0.0, 1.0));
+  c += (u_lift + u_liftMaster) * (1.0 - smoothstep(0.0, 0.4, lum));
+  c += (u_gamma + u_gammaMaster) * max(1.0 - abs(lum - 0.5) * 2.0, 0.0) * 0.5;
+  c = mix(c, c * (vec3(1.0) + u_gain + u_gainMaster), smoothstep(0.4, 1.0, lum));
+
+  c = linearToSrgb(clamp(c, 0.0, 1.0));
+
+  // Curves
+  float lumS = dot(c, vec3(0.299, 0.587, 0.114));
+  float mv = texture2D(u_curveLUT, vec2(lumS, 0.125)).r;
+  c += mv - lumS;
+  c.r = texture2D(u_curveLUT, vec2(clamp(c.r,0.0,1.0), 0.375)).r;
+  c.g = texture2D(u_curveLUT, vec2(clamp(c.g,0.0,1.0), 0.625)).r;
+  c.b = texture2D(u_curveLUT, vec2(clamp(c.b,0.0,1.0), 0.875)).r;
+
+  // HSL Secondary
+  vec3 hslC = rgbToHsl(clamp(c, 0.0, 1.0));
+  float pixHue = hslC.x * 360.0;
+  float hueDist = abs(pixHue - u_hslHueCenter);
+  if (hueDist > 180.0) hueDist = 360.0 - hueDist;
+  float hueEdge = u_hslHueWidth * 0.5;
+  float soft = max(u_hslSoftness, 0.1);
+  float hueMask = 1.0 - smoothstep(hueEdge - soft, hueEdge + soft, hueDist);
+  float satMask = smoothstep(u_hslSatMin - 0.02, u_hslSatMin + 0.02, hslC.y) * (1.0 - smoothstep(u_hslSatMax - 0.02, u_hslSatMax + 0.02, hslC.y));
+  float lumMask = smoothstep(u_hslLumMin - 0.02, u_hslLumMin + 0.02, hslC.z) * (1.0 - smoothstep(u_hslLumMax - 0.02, u_hslLumMax + 0.02, hslC.z));
+  float qualifier = hueMask * satMask * lumMask;
+
+  if (u_hslShowMask > 0.5) {
+    gl_FragColor = vec4(vec3(qualifier), 1.0);
+    return;
+  }
+
+  if (qualifier > 0.001) {
+    hslC.x += u_hslHueShift / 360.0;
+    if (hslC.x > 1.0) hslC.x -= 1.0;
+    if (hslC.x < 0.0) hslC.x += 1.0;
+    hslC.y = clamp(hslC.y + u_hslSatAdjust, 0.0, 1.0);
+    hslC.z = clamp(hslC.z + u_hslLumAdjust, 0.0, 1.0);
+    vec3 adjusted = hslToRgb(hslC);
+    c = mix(c, adjusted, qualifier);
+  }
+
+  // 3D LUT
+  if (u_lutEnabled > 0.5) c = mix(c, sampleLUT(c), u_lutIntensity);
+
+  // Split Toning
+  float splitLum = dot(c, vec3(0.299, 0.587, 0.114));
+  float splitBal = u_splitBalance * 0.5 + 0.5;
+  if (u_splitShadowSat > 0.001) {
+    float shW = (1.0 - smoothstep(0.0, splitBal, splitLum)) * u_splitShadowSat;
+    vec3 shColor = hslToRgb(vec3(u_splitShadowHue / 360.0, 1.0, 0.5));
+    c = mix(c, c * shColor * 2.0, shW * 0.3);
+  }
+  if (u_splitHighlightSat > 0.001) {
+    float hiW = smoothstep(splitBal, 1.0, splitLum) * u_splitHighlightSat;
+    vec3 hiColor = hslToRgb(vec3(u_splitHighlightHue / 360.0, 1.0, 0.5));
+    c = mix(c, c * hiColor * 2.0, hiW * 0.3);
+  }
+
+  // Vignette
+  if (abs(u_vignetteAmount) > 0.001) {
+    vec2 vc = uv - 0.5;
+    float round = mix(1.0, 0.5, u_vignetteRoundness);
+    vc.x *= mix(1.0, u_resolution.x / u_resolution.y, round);
+    float d = length(vc);
+    float mid = u_vignetteMidpoint;
+    float feath = max(u_vignetteFeather, 0.01);
+    float vig = smoothstep(mid - feath * 0.5, mid + feath * 0.5, d);
+    c *= 1.0 - vig * u_vignetteAmount;
+  }
+
+  // Film Grain
+  if (u_grainAmount > 0.001) {
+    vec2 grainUV = uv * u_resolution / u_grainSize;
+    float n = hash(grainUV + u_time) * 2.0 - 1.0;
+    c += n * u_grainAmount * 0.15;
+  }
+
+  // Shape Mask + Layer Opacity
+  float blendAlpha = u_layerOpacity;
+  if (u_maskEnabled > 0.5) {
+    float maskVal = texture2D(u_maskTex, uv).r;
+    if (u_maskShowOverlay > 0.5) {
+      vec3 overlay = mix(c * 0.3, c, maskVal);
+      overlay = mix(overlay, vec3(0.6, 0.3, 1.0), (1.0 - maskVal) * 0.15);
+      gl_FragColor = vec4(clamp(overlay, 0.0, 1.0), 1.0);
+      return;
+    }
+    blendAlpha *= maskVal;
+  }
+  c = mix(original, c, blendAlpha);
+
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+// ═══════════════════════════════════════════
+// Layer System
+// ═══════════════════════════════════════════
+const LAYER_PARAMS = [
+  'temperature','tint','exposure','contrast','highlights','shadows','whites','blacks',
+  'saturation','vibrance',
+  'liftX','liftY','liftMaster','gammaX','gammaY','gammaMaster','gainX','gainY','gainMaster',
+  'hslHueCenter','hslHueWidth','hslSoftness','hslSatMin','hslSatMax','hslLumMin','hslLumMax',
+  'hslHueShift','hslSatAdjust','hslLumAdjust','hslShowMask',
+  'splitShadowHue','splitShadowSat','splitHighlightHue','splitHighlightSat','splitBalance',
+  'vignetteAmount','vignetteMidpoint','vignetteRoundness','vignetteFeather',
+  'grainAmount','grainSize','sharpenAmount','sharpenRadius',
+  'maskEnabled','maskShape','maskFeather','maskInvert','maskShowOverlay',
+  'maskCenterX','maskCenterY','maskRadiusX','maskRadiusY',
+  'lutIntensity','lutEnabled',
+];
+const LAYER_PARAMS_SET = new Set(LAYER_PARAMS);
+
+function createDefaultLayerData(name) {
+  return {
+    id: 'layer_' + Date.now() + '_' + Math.random().toString(36).substr(2,5),
+    name: name || 'Layer',
+    enabled: true, opacity: 1.0, solo: false,
+    temperature: 0, tint: 0, exposure: 0, contrast: 0,
+    highlights: 0, shadows: 0, whites: 0, blacks: 0,
+    saturation: 1.0, vibrance: 0,
+    liftX: 0, liftY: 0, liftMaster: 0,
+    gammaX: 0, gammaY: 0, gammaMaster: 0,
+    gainX: 0, gainY: 0, gainMaster: 0,
+    hslHueCenter: 0, hslHueWidth: 30, hslSoftness: 20,
+    hslSatMin: 0, hslSatMax: 1, hslLumMin: 0, hslLumMax: 1,
+    hslHueShift: 0, hslSatAdjust: 0, hslLumAdjust: 0, hslShowMask: false,
+    splitShadowHue: 220, splitShadowSat: 0, splitHighlightHue: 40, splitHighlightSat: 0, splitBalance: 0,
+    vignetteAmount: 0, vignetteMidpoint: 0.5, vignetteRoundness: 0.5, vignetteFeather: 0.5,
+    grainAmount: 0, grainSize: 1.0, sharpenAmount: 0, sharpenRadius: 1.0,
+    maskEnabled: false, maskShape: null, maskFeather: 0.3, maskInvert: false, maskShowOverlay: false,
+    maskCenterX: 0.5, maskCenterY: 0.5, maskRadiusX: 0.2, maskRadiusY: 0.15,
+    lutIntensity: 1.0, lutEnabled: false,
+    curves: { master: [{x:0,y:0},{x:1,y:1}], red: [{x:0,y:0},{x:1,y:1}], green: [{x:0,y:0},{x:1,y:1}], blue: [{x:0,y:0},{x:1,y:1}] },
+    maskTextureData: null, // cached Uint8Array for GPU upload
+    rotoSeedPoints: [],
+    rotoMaskData: null,
+  };
+}
+
+function getActiveLayer() { return state.layers[state.activeLayerIndex]; }
+
+function syncCurvesToActiveLayer() {
+  const layer = getActiveLayer();
+  if (layer) layer.curves = JSON.parse(JSON.stringify(state.curves));
+}
+
+function loadLayerToState(index) {
+  state._loading = true;
+  state.activeLayerIndex = index;
+  const layer = state.layers[index];
+  LAYER_PARAMS.forEach(k => { state[k] = layer[k]; });
+  state.curves = JSON.parse(JSON.stringify(layer.curves));
+  // Restore roto state
+  rotoSeedPoints = layer.rotoSeedPoints ? [...layer.rotoSeedPoints.map(p => ({...p}))] : [];
+  rotoMaskData = layer.rotoMaskData ? new Uint8Array(layer.rotoMaskData) : null;
+  state._loading = false;
+  // Update UI
+  syncAllSliders();
+  updateCurveLUT();
+  if (document.getElementById('panel-curves') && !document.getElementById('panel-curves').classList.contains('hidden')) drawCurveEditor();
+  if (document.getElementById('panel-wheels') && !document.getElementById('panel-wheels').classList.contains('hidden')) drawAllWheels();
+  updateHueIndicator();
+  updateMaskTexture();
+  drawMaskOverlay();
+  renderLayersList();
+  document.getElementById('layerBadge').textContent = layer.name;
+}
+
+// ═══════════════════════════════════════════
+// State (Proxy auto-syncs to active layer)
+// ═══════════════════════════════════════════
+const _stateData = {
+  temperature: 0, tint: 0, exposure: 0, contrast: 0,
+  highlights: 0, shadows: 0, whites: 0, blacks: 0,
+  saturation: 1.0, vibrance: 0,
+  liftX: 0, liftY: 0, liftMaster: 0,
+  gammaX: 0, gammaY: 0, gammaMaster: 0,
+  gainX: 0, gainY: 0, gainMaster: 0,
+  lutIntensity: 1.0, lutEnabled: false, lutSize: 0,
+  showOriginal: false,
+  curves: { master: [{x:0,y:0},{x:1,y:1}], red: [{x:0,y:0},{x:1,y:1}], green: [{x:0,y:0},{x:1,y:1}], blue: [{x:0,y:0},{x:1,y:1}] },
+  activeCurveChannel: 'master',
+  videoLoaded: false,
+  hslHueCenter: 0, hslHueWidth: 30, hslSoftness: 20,
+  hslSatMin: 0, hslSatMax: 1, hslLumMin: 0, hslLumMax: 1,
+  hslHueShift: 0, hslSatAdjust: 0, hslLumAdjust: 0, hslShowMask: false,
+  splitShadowHue: 220, splitShadowSat: 0, splitHighlightHue: 40, splitHighlightSat: 0, splitBalance: 0,
+  vignetteAmount: 0, vignetteMidpoint: 0.5, vignetteRoundness: 0.5, vignetteFeather: 0.5,
+  grainAmount: 0, grainSize: 1.0, sharpenAmount: 0, sharpenRadius: 1.0,
+  maskEnabled: false, maskShape: null, maskFeather: 0.3, maskInvert: false, maskShowOverlay: false,
+  maskCenterX: 0.5, maskCenterY: 0.5, maskRadiusX: 0.2, maskRadiusY: 0.15,
+  trackData: {},
+  // Layer system
+  layers: [],
+  activeLayerIndex: 0,
+  _loading: false,
+};
+const state = new Proxy(_stateData, {
+  set(target, prop, value) {
+    target[prop] = value;
+    if (!target._loading && target.layers && target.layers.length > 0 && LAYER_PARAMS_SET.has(prop)) {
+      const layer = target.layers[target.activeLayerIndex];
+      if (layer) layer[prop] = value;
+    }
+    return true;
+  },
+  get(target, prop) { return target[prop]; }
+});
+
+// ═══════════════════════════════════════════
+// Undo / Redo
+// ═══════════════════════════════════════════
+const UNDO_KEYS = ['temperature','tint','exposure','contrast','highlights','shadows','whites','blacks','saturation','vibrance',
+  'liftX','liftY','liftMaster','gammaX','gammaY','gammaMaster','gainX','gainY','gainMaster',
+  'hslHueCenter','hslHueWidth','hslSoftness','hslSatMin','hslSatMax','hslLumMin','hslLumMax','hslHueShift','hslSatAdjust','hslLumAdjust',
+  'splitShadowHue','splitShadowSat','splitHighlightHue','splitHighlightSat','splitBalance',
+  'vignetteAmount','vignetteMidpoint','vignetteRoundness','vignetteFeather','grainAmount','grainSize','sharpenAmount','sharpenRadius',
+  'lutIntensity','lutEnabled'];
+const undoStack = [], redoStack = [];
+let undoTimer = null;
+
+function captureState() {
+  const snap = {};
+  UNDO_KEYS.forEach(k => snap[k] = state[k]);
+  snap.curves = JSON.parse(JSON.stringify(state.curves));
+  // Capture all layers
+  snap.layers = state.layers.map(l => {
+    const lc = {};
+    LAYER_PARAMS.forEach(k => lc[k] = l[k]);
+    lc.id = l.id; lc.name = l.name; lc.enabled = l.enabled; lc.opacity = l.opacity; lc.solo = l.solo;
+    lc.curves = JSON.parse(JSON.stringify(l.curves));
+    lc.maskTextureData = l.maskTextureData ? new Uint8Array(l.maskTextureData) : null;
+    lc.rotoSeedPoints = l.rotoSeedPoints ? l.rotoSeedPoints.map(p => ({...p})) : [];
+    lc.rotoMaskData = l.rotoMaskData ? new Uint8Array(l.rotoMaskData) : null;
+    return lc;
+  });
+  snap.activeLayerIndex = state.activeLayerIndex;
+  return snap;
+}
+
+function restoreState(snap) {
+  UNDO_KEYS.forEach(k => { if (snap[k] !== undefined) state[k] = snap[k]; });
+  if (snap.curves) state.curves = JSON.parse(JSON.stringify(snap.curves));
+  // Restore layers
+  if (snap.layers) {
+    state.layers.forEach((l, i) => {
+      if (!snap.layers[i]) return;
+      const sl = snap.layers[i];
+      LAYER_PARAMS.forEach(k => l[k] = sl[k]);
+      l.name = sl.name; l.enabled = sl.enabled; l.opacity = sl.opacity; l.solo = sl.solo;
+      l.curves = JSON.parse(JSON.stringify(sl.curves));
+      l.maskTextureData = sl.maskTextureData ? new Uint8Array(sl.maskTextureData) : null;
+      l.rotoSeedPoints = sl.rotoSeedPoints ? sl.rotoSeedPoints.map(p => ({...p})) : [];
+      l.rotoMaskData = sl.rotoMaskData ? new Uint8Array(sl.rotoMaskData) : null;
+    });
+    // Handle added/removed layers
+    while (state.layers.length > snap.layers.length) state.layers.pop();
+    while (state.layers.length < snap.layers.length) {
+      const sl = snap.layers[state.layers.length];
+      const nl = createDefaultLayerData(sl.name);
+      LAYER_PARAMS.forEach(k => nl[k] = sl[k]);
+      nl.id = sl.id; nl.name = sl.name; nl.enabled = sl.enabled; nl.opacity = sl.opacity; nl.solo = sl.solo;
+      nl.curves = JSON.parse(JSON.stringify(sl.curves));
+      nl.maskTextureData = sl.maskTextureData ? new Uint8Array(sl.maskTextureData) : null;
+      nl.rotoSeedPoints = sl.rotoSeedPoints ? sl.rotoSeedPoints.map(p => ({...p})) : [];
+      nl.rotoMaskData = sl.rotoMaskData ? new Uint8Array(sl.rotoMaskData) : null;
+      state.layers.push(nl);
+    }
+    if (snap.activeLayerIndex !== undefined) loadLayerToState(snap.activeLayerIndex);
+  }
+  updateCurveLUT(); syncAllSliders(); drawCurveEditor(); drawAllWheels();
+}
+
+function pushUndo() {
+  // Debounce: only push after 300ms of inactivity
+  if (undoTimer) clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => {
+    const snap = captureState();
+    if (undoStack.length > 0) {
+      const last = undoStack[undoStack.length - 1];
+      // Skip if identical
+      if (JSON.stringify(last) === JSON.stringify(snap)) return;
+    }
+    undoStack.push(snap);
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack.length = 0;
+    updateUndoButtons();
+  }, 300);
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(captureState());
+  const snap = undoStack.pop();
+  restoreState(snap);
+  updateUndoButtons();
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(captureState());
+  const snap = redoStack.pop();
+  restoreState(snap);
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  document.getElementById('undoBtn').disabled = undoStack.length === 0;
+  document.getElementById('redoBtn').disabled = redoStack.length === 0;
+  document.getElementById('undoBtn').style.color = undoStack.length ? 'var(--accent)' : 'var(--text-dim)';
+  document.getElementById('redoBtn').style.color = redoStack.length ? 'var(--accent)' : 'var(--text-dim)';
+}
+
+// Push initial state
+setTimeout(() => { undoStack.push(captureState()); updateUndoButtons(); }, 100);
+
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('redoBtn').onclick = redo;
+
+// ═══════════════════════════════════════════
+// WebGL
+// ═══════════════════════════════════════════
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true, premultipliedAlpha: false });
+const video = document.getElementById('sourceVideo');
+const maskCanvas = document.getElementById('maskCanvas');
+const maskCtx = maskCanvas.getContext('2d');
+let program, videoTexture, curveLUTTexture, lut3DTexture, maskTexture;
+let animFrameId, startTime = Date.now();
+let fboA, fboB, fboTexA, fboTexB, fboWidth = 0, fboHeight = 0;
+
+function createFBOTexture(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return tex;
+}
+
+function initFBOs(w, h) {
+  if (fboWidth === w && fboHeight === h) return;
+  fboWidth = w; fboHeight = h;
+  if (fboTexA) gl.deleteTexture(fboTexA);
+  if (fboTexB) gl.deleteTexture(fboTexB);
+  if (fboA) gl.deleteFramebuffer(fboA);
+  if (fboB) gl.deleteFramebuffer(fboB);
+  fboTexA = createFBOTexture(w, h);
+  fboA = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTexA, 0);
+  fboTexB = createFBOTexture(w, h);
+  fboB = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTexB, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function initWebGL() {
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, vertSrc); gl.compileShader(vs);
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, fragSrc); gl.compileShader(fs);
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fs));
+
+  program = gl.createProgram();
+  gl.attachShader(program, vs); gl.attachShader(program, fs);
+  gl.linkProgram(program); gl.useProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(program));
+
+  const verts = new Float32Array([-1,-1,0,1, 1,-1,1,1, -1,1,0,0, 1,1,1,0]);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(program, 'a_pos');
+  const aUV = gl.getAttribLocation(program, 'a_uv');
+  gl.enableVertexAttribArray(aPos); gl.enableVertexAttribArray(aUV);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, 16, 8);
+
+  videoTexture = createTexture();
+  curveLUTTexture = createTexture();
+  lut3DTexture = createTexture();
+  maskTexture = createTexture();
+  updateCurveLUT();
+  updateMaskTexture();
+}
+
+function createTexture() {
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  return tex;
+}
+
+function setU(name, value) { const l = gl.getUniformLocation(program, name); if (l) gl.uniform1f(l, value); }
+function setU2(name, x, y) { const l = gl.getUniformLocation(program, name); if (l) gl.uniform2f(l, x, y); }
+function setU3(name, x, y, z) { const l = gl.getUniformLocation(program, name); if (l) gl.uniform3f(l, x, y, z); }
+
+// ═══════════════════════════════════════════
+// Mask Texture
+// ═══════════════════════════════════════════
+function updateMaskTexture() {
+  const size = 256;
+  const data = new Uint8Array(size * size);
+  if (state.maskShape && state.maskShape !== 'roto') {
+    const cx = state.maskCenterX, cy = state.maskCenterY;
+    const rx = state.maskRadiusX, ry = state.maskRadiusY;
+    const feather = state.maskFeather;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const nx = x / (size - 1), ny = y / (size - 1);
+        let d;
+        if (state.maskShape === 'ellipse') {
+          const dx = (nx - cx) / rx, dy = (ny - cy) / ry;
+          d = Math.sqrt(dx*dx + dy*dy);
+        } else {
+          const dx = Math.abs(nx - cx) / rx, dy = Math.abs(ny - cy) / ry;
+          d = Math.max(dx, dy);
+        }
+        let mask = 1.0 - smoothstepJS(1.0 - feather, 1.0 + feather, d);
+        if (state.maskInvert) mask = 1.0 - mask;
+        data[y * size + x] = Math.round(mask * 255);
+      }
+    }
+    state.maskEnabled = true;
+  } else if (state.maskShape !== 'roto') {
+    data.fill(255);
+    state.maskEnabled = false;
+  }
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+  if (state.maskShape !== 'roto') {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, size, size, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+  }
+  // Save mask texture data to active layer
+  const layer = getActiveLayer();
+  if (layer) {
+    if (state.maskShape === 'roto') {
+      // roto mask data saved separately in applyRotoMask
+    } else {
+      layer.maskTextureData = state.maskShape ? new Uint8Array(data) : null;
+    }
+    // Sync roto state
+    layer.rotoSeedPoints = rotoSeedPoints ? rotoSeedPoints.map(p => ({...p})) : [];
+    layer.rotoMaskData = rotoMaskData ? new Uint8Array(rotoMaskData) : null;
+  }
+}
+
+function smoothstepJS(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function drawMaskOverlay() {
+  const glC = document.getElementById('glCanvas');
+  maskCanvas.width = glC.clientWidth; maskCanvas.height = glC.clientHeight;
+  maskCanvas.style.width = glC.style.width; maskCanvas.style.height = glC.style.height;
+  maskCanvas.style.left = glC.offsetLeft + 'px'; maskCanvas.style.top = glC.offsetTop + 'px';
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  if (!state.maskShape) return;
+  const w = maskCanvas.width, h = maskCanvas.height;
+
+  if (state.maskShape === 'roto') {
+    // Draw seed points
+    rotoSeedPoints.forEach(p => {
+      const px = p.x * w, py = p.y * h;
+      maskCtx.fillStyle = p.type === 'add' ? 'rgba(74,222,128,0.9)' : 'rgba(248,113,113,0.9)';
+      maskCtx.strokeStyle = 'white';
+      maskCtx.lineWidth = 1.5;
+      maskCtx.beginPath(); maskCtx.arc(px, py, 6, 0, Math.PI * 2); maskCtx.fill(); maskCtx.stroke();
+      // + or - symbol
+      maskCtx.strokeStyle = 'white'; maskCtx.lineWidth = 1.5;
+      maskCtx.beginPath(); maskCtx.moveTo(px - 3, py); maskCtx.lineTo(px + 3, py); maskCtx.stroke();
+      if (p.type === 'add') { maskCtx.beginPath(); maskCtx.moveTo(px, py - 3); maskCtx.lineTo(px, py + 3); maskCtx.stroke(); }
+    });
+    return;
+  }
+
+  // Shape mask overlay
+  const cx = state.maskCenterX * w, cy = state.maskCenterY * h;
+  const rx = state.maskRadiusX * w, ry = state.maskRadiusY * h;
+  maskCtx.strokeStyle = 'rgba(167,139,250,0.7)';
+  maskCtx.lineWidth = 1.5;
+  maskCtx.setLineDash([4, 4]);
+  if (state.maskShape === 'ellipse') {
+    maskCtx.beginPath(); maskCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); maskCtx.stroke();
+  } else {
+    maskCtx.strokeRect(cx - rx, cy - ry, rx * 2, ry * 2);
+  }
+  maskCtx.setLineDash([]);
+  maskCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+  maskCtx.lineWidth = 1;
+  maskCtx.beginPath(); maskCtx.moveTo(cx - 8, cy); maskCtx.lineTo(cx + 8, cy); maskCtx.stroke();
+  maskCtx.beginPath(); maskCtx.moveTo(cx, cy - 8); maskCtx.lineTo(cx, cy + 8); maskCtx.stroke();
+}
+
+// ═══════════════════════════════════════════
+// Curves
+// ═══════════════════════════════════════════
+function generateCurveLUT(points) {
+  const sorted = [...points].sort((a,b) => a.x - b.x);
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = Math.max(0, Math.min(1, hermiteInterp(i / 255, sorted)));
+  return lut;
+}
+function hermiteInterp(x, pts) {
+  if (x <= pts[0].x) return pts[0].y;
+  if (x >= pts[pts.length-1].x) return pts[pts.length-1].y;
+  let seg = 0;
+  for (let i = 0; i < pts.length-1; i++) { if (x >= pts[i].x && x < pts[i+1].x) { seg = i; break; } }
+  const x0=pts[seg].x, x1=pts[seg+1].x, y0=pts[seg].y, y1=pts[seg+1].y;
+  const t = (x-x0)/(x1-x0);
+  const m0 = seg > 0 ? (y1-pts[seg-1].y)/(x1-pts[seg-1].x)*(x1-x0) : (y1-y0);
+  const m1 = seg < pts.length-2 ? (pts[seg+2].y-y0)/(pts[seg+2].x-x0)*(x1-x0) : (y1-y0);
+  const t2=t*t, t3=t2*t;
+  return (2*t3-3*t2+1)*y0 + (t3-2*t2+t)*m0 + (-2*t3+3*t2)*y1 + (t3-t2)*m1;
+}
+function updateCurveLUT() {
+  const m = generateCurveLUT(state.curves.master), r = generateCurveLUT(state.curves.red);
+  const g = generateCurveLUT(state.curves.green), b = generateCurveLUT(state.curves.blue);
+  const data = new Uint8Array(256 * 4);
+  for (let i = 0; i < 256; i++) { data[i]=Math.round(m[i]*255); data[256+i]=Math.round(r[i]*255); data[512+i]=Math.round(g[i]*255); data[768+i]=Math.round(b[i]*255); }
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, curveLUTTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 4, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+  // Sync curves to active layer
+  syncCurvesToActiveLayer();
+}
+
+// ═══════════════════════════════════════════
+// 3D LUT
+// ═══════════════════════════════════════════
+function parseCubeLUT(text) {
+  const lines = text.split('\n'); let size = 0, data = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    if (t.startsWith('LUT_3D_SIZE')) { size = parseInt(t.split(/\s+/)[1]); continue; }
+    if (t.startsWith('TITLE') || t.startsWith('DOMAIN')) continue;
+    const parts = t.split(/\s+/);
+    if (parts.length >= 3) data.push(parseFloat(parts[0]), parseFloat(parts[1]), parseFloat(parts[2]));
+  }
+  if (size === 0 || data.length !== size*size*size*3) return null;
+  return { size, data: new Float32Array(data) };
+}
+function uploadLUT3D(lutData) {
+  const { size, data } = lutData;
+  const atlasW = size * size, atlasH = size;
+  const pixels = new Uint8Array(atlasW * atlasH * 4);
+  // .cube order: R fastest, then G, then B
+  // Shader expects atlas pixel (b*size + r, g) = LUT value at (r, g, b)
+  for (let b = 0; b < size; b++) {
+    for (let g = 0; g < size; g++) {
+      for (let r = 0; r < size; r++) {
+        const srcIdx = (r + g * size + b * size * size) * 3;
+        const dstX = b * size + r;
+        const dstY = g;
+        const dstIdx = (dstY * atlasW + dstX) * 4;
+        pixels[dstIdx]   = Math.round(Math.min(1, Math.max(0, data[srcIdx]))   * 255);
+        pixels[dstIdx+1] = Math.round(Math.min(1, Math.max(0, data[srcIdx+1])) * 255);
+        pixels[dstIdx+2] = Math.round(Math.min(1, Math.max(0, data[srcIdx+2])) * 255);
+        pixels[dstIdx+3] = 255;
+      }
+    }
+  }
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, lut3DTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, atlasW, atlasH, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  state.lutSize = size; state.lutEnabled = true;
+}
+
+// ═══════════════════════════════════════════
+// Render
+// ═══════════════════════════════════════════
+function setUniformsFromLayer(layer) {
+  setU('u_temperature', layer.temperature / 100);
+  setU('u_tint', layer.tint / 100);
+  setU('u_exposure', layer.exposure);
+  setU('u_contrast', layer.contrast / 100);
+  setU('u_highlights', layer.highlights / 100);
+  setU('u_shadows', layer.shadows / 100);
+  setU('u_whites', layer.whites / 100);
+  setU('u_blacks', layer.blacks / 100);
+  setU('u_saturation', layer.saturation);
+  setU('u_vibrance', layer.vibrance / 100);
+
+  const lR=layer.liftX*0.1,lG=layer.liftY*0.05,lB=-layer.liftX*0.05-layer.liftY*0.1;
+  const gR=layer.gammaX*0.1,gG=layer.gammaY*0.05,gB=-layer.gammaX*0.05-layer.gammaY*0.1;
+  const gnR=layer.gainX*0.2,gnG=layer.gainY*0.1,gnB=-layer.gainX*0.1-layer.gainY*0.2;
+  setU3('u_lift',lR,lG,lB); setU3('u_gamma',gR,gG,gB); setU3('u_gain',gnR,gnG,gnB);
+  setU('u_liftMaster', layer.liftMaster); setU('u_gammaMaster', layer.gammaMaster); setU('u_gainMaster', layer.gainMaster);
+  setU('u_lutIntensity', layer.lutIntensity); setU('u_lutEnabled', layer.lutEnabled ? 1 : 0);
+  setU('u_lutSize', state.lutSize); setU('u_showOriginal', state.showOriginal ? 1 : 0);
+  setU('u_layerOpacity', layer.opacity);
+
+  // HSL
+  setU('u_hslHueCenter', layer.hslHueCenter); setU('u_hslHueWidth', layer.hslHueWidth);
+  setU('u_hslSoftness', layer.hslSoftness); setU('u_hslSatMin', layer.hslSatMin);
+  setU('u_hslSatMax', layer.hslSatMax); setU('u_hslLumMin', layer.hslLumMin);
+  setU('u_hslLumMax', layer.hslLumMax); setU('u_hslHueShift', layer.hslHueShift);
+  setU('u_hslSatAdjust', layer.hslSatAdjust); setU('u_hslLumAdjust', layer.hslLumAdjust);
+  setU('u_hslShowMask', layer.hslShowMask ? 1 : 0);
+
+  // FX
+  setU('u_splitShadowHue', layer.splitShadowHue); setU('u_splitShadowSat', layer.splitShadowSat / 100);
+  setU('u_splitHighlightHue', layer.splitHighlightHue); setU('u_splitHighlightSat', layer.splitHighlightSat / 100);
+  setU('u_splitBalance', layer.splitBalance / 100);
+  setU('u_vignetteAmount', layer.vignetteAmount / 100); setU('u_vignetteMidpoint', layer.vignetteMidpoint);
+  setU('u_vignetteRoundness', layer.vignetteRoundness); setU('u_vignetteFeather', layer.vignetteFeather);
+  setU('u_grainAmount', layer.grainAmount / 100); setU('u_grainSize', layer.grainSize);
+  setU('u_time', ((Date.now() - startTime) / 1000) % 100);
+  setU('u_sharpenAmount', layer.sharpenAmount / 100); setU('u_sharpenRadius', layer.sharpenRadius);
+  setU2('u_resolution', canvas.width, canvas.height);
+
+  // Mask
+  setU('u_maskEnabled', layer.maskEnabled ? 1 : 0);
+  setU('u_maskShowOverlay', layer.maskShowOverlay ? 1 : 0);
+}
+
+function uploadLayerMask(layer) {
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+  if (layer.maskTextureData) {
+    const size = layer.maskShape === 'roto' ? ROTO_SIZE : 256;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, size, size, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, layer.maskTextureData);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array([255]));
+  }
+}
+
+function uploadLayerCurveLUT(layer) {
+  const m = generateCurveLUT(layer.curves.master), r = generateCurveLUT(layer.curves.red);
+  const g = generateCurveLUT(layer.curves.green), b = generateCurveLUT(layer.curves.blue);
+  const data = new Uint8Array(256 * 4);
+  for (let i = 0; i < 256; i++) { data[i]=Math.round(m[i]*255); data[256+i]=Math.round(r[i]*255); data[512+i]=Math.round(g[i]*255); data[768+i]=Math.round(b[i]*255); }
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, curveLUTTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 4, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+}
+
+function render() {
+  if (!state.videoLoaded) { animFrameId = requestAnimationFrame(render); return; }
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width = video.videoWidth || 1920; canvas.height = video.videoHeight || 1080;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    initFBOs(canvas.width, canvas.height);
+  }
+
+  // Upload video texture
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+
+  gl.useProgram(program);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_video'), 0);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_curveLUT'), 1);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_lut3d'), 2);
+  gl.uniform1i(gl.getUniformLocation(program, 'u_maskTex'), 3);
+
+  // Determine enabled layers
+  const hasSolo = state.layers.some(l => l.solo);
+  const enabledLayers = state.layers.filter(l => hasSolo ? l.solo : (l.enabled && l.opacity > 0));
+
+  if (enabledLayers.length === 0) {
+    // Show original video
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    setU('u_showOriginal', 1);
+    setU('u_layerOpacity', 1);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    animFrameId = requestAnimationFrame(render);
+    return;
+  }
+
+  if (enabledLayers.length === 1) {
+    // Single layer: render directly to screen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+    uploadLayerCurveLUT(enabledLayers[0]);
+    uploadLayerMask(enabledLayers[0]);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, lut3DTexture);
+    setUniformsFromLayer(enabledLayers[0]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  } else {
+    // Multi-layer: ping-pong FBO rendering
+    initFBOs(canvas.width, canvas.height);
+    // Ping-pong: alternate between FBO A and FBO B
+    // Layer 0: video → FBO A
+    // Layer 1: FBO A → FBO B
+    // Layer 2: FBO B → FBO A (or screen if last)
+    // etc.
+    const fbos = [fboA, fboB];
+    const fboTexs = [fboTexA, fboTexB];
+    let writeIdx = 0; // which FBO to write to
+
+    for (let i = 0; i < enabledLayers.length; i++) {
+      const layer = enabledLayers[i];
+      const isLast = (i === enabledLayers.length - 1);
+
+      // Output target
+      if (isLast) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      } else {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[writeIdx]);
+      }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      // Input texture
+      gl.activeTexture(gl.TEXTURE0);
+      if (i === 0) {
+        gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+      } else {
+        // Read from the OTHER FBO (the one we wrote to last time)
+        gl.bindTexture(gl.TEXTURE_2D, fboTexs[1 - writeIdx]);
+      }
+
+      // Upload this layer's curves and mask
+      uploadLayerCurveLUT(layer);
+      uploadLayerMask(layer);
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, lut3DTexture);
+
+      setUniformsFromLayer(layer);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // Swap for next pass
+      writeIdx = 1 - writeIdx;
+    }
+  }
+
+  animFrameId = requestAnimationFrame(render);
+}
+
+// ═══════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════
+document.getElementById('importBtn').onclick = () => document.getElementById('videoInput').click();
+document.getElementById('videoInput').onchange = (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  video.src = URL.createObjectURL(file); video.load();
+  video.onloadeddata = () => {
+    state.videoLoaded = true; canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('transportBar').classList.remove('hidden');
+    document.getElementById('exportBtn').disabled = false;
+    document.getElementById('scrubber').max = video.duration;
+    document.getElementById('duration').textContent = formatTC(video.duration);
+    video.currentTime = 0;
+  };
+};
+
+document.getElementById('playPause').onclick = () => {
+  if (video.paused) { video.play(); document.getElementById('playPause').textContent = '⏸'; }
+  else { video.pause(); document.getElementById('playPause').textContent = '▶'; }
+};
+document.getElementById('stepBack').onclick = () => { video.currentTime = Math.max(0, video.currentTime - 1/24); };
+document.getElementById('stepFwd').onclick = () => { video.currentTime += 1/24; };
+document.getElementById('scrubber').oninput = (e) => { video.currentTime = parseFloat(e.target.value); };
+video.ontimeupdate = () => { document.getElementById('scrubber').value = video.currentTime; document.getElementById('currentTime').textContent = formatTC(video.currentTime); };
+
+function formatTC(s) { if (!isFinite(s)) return '00:00:00:00'; const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),f=Math.floor((s%1)*24); return `${p(h)}:${p(m)}:${p(sec)}:${p(f)}`; }
+function p(n) { return n.toString().padStart(2, '0'); }
+
+// Tabs
+const allTabs = ['basic','curves','wheels','hsl','fx','mask','layers','lut','presets'];
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    allTabs.forEach(t => document.getElementById('panel-'+t).classList.toggle('hidden', t !== tab));
+    // Toggle mask canvas interaction
+    maskCanvas.classList.toggle('active', tab === 'mask' && !!state.maskShape);
+    if (tab === 'curves') drawCurveEditor();
+    if (tab === 'wheels') drawAllWheels();
+    if (tab === 'mask') drawMaskOverlay();
+    if (tab === 'hsl') updateHueIndicator();
+    if (tab === 'presets') renderPresets();
+    if (tab === 'layers') renderLayersList();
+  };
+});
+
+// Basic sliders
+document.querySelectorAll('#panel-basic input[type=range]').forEach(input => {
+  const param = input.dataset.param, scale = parseFloat(input.dataset.scale || '1');
+  const valSpan = input.nextElementSibling;
+  input.oninput = () => { const raw = parseFloat(input.value); state[param] = raw * scale; valSpan.textContent = scale < 1 ? (raw*scale).toFixed(2) : Math.round(raw).toString(); pushUndo(); };
+});
+
+// HSL sliders
+document.querySelectorAll('[data-hsl]').forEach(input => {
+  const param = input.dataset.hsl;
+  const valSpan = input.nextElementSibling;
+  input.oninput = () => {
+    const raw = parseFloat(input.value);
+    if (param === 'hslSatMin' || param === 'hslSatMax' || param === 'hslLumMin' || param === 'hslLumMax') {
+      state[param] = raw / 100;
+      valSpan.textContent = Math.round(raw).toString();
+    } else if (param === 'hslSoftness') {
+      state[param] = raw;
+      valSpan.textContent = Math.round(raw).toString();
+    } else if (param === 'hslHueCenter' || param === 'hslHueWidth' || param === 'hslHueShift') {
+      state[param] = raw;
+      valSpan.textContent = Math.round(raw) + '°';
+    } else if (param === 'hslSatAdjust' || param === 'hslLumAdjust') {
+      state[param] = raw / 100;
+      valSpan.textContent = Math.round(raw).toString();
+    }
+    updateHueIndicator(); pushUndo();
+  };
+});
+
+document.getElementById('hslMaskToggle').onclick = function() {
+  state.hslShowMask = !state.hslShowMask;
+  this.textContent = state.hslShowMask ? 'ON' : 'OFF';
+  this.classList.toggle('on', state.hslShowMask);
+};
+
+function updateHueIndicator() {
+  const ind = document.getElementById('hueIndicator');
+  const center = state.hslHueCenter / 360;
+  const width = state.hslHueWidth / 360;
+  const left = ((center - width/2) + 1) % 1;
+  ind.style.left = (left * 100) + '%';
+  ind.style.width = (width * 100) + '%';
+}
+
+// FX sliders
+document.querySelectorAll('[data-fx]').forEach(input => {
+  const param = input.dataset.fx;
+  const valSpan = input.nextElementSibling;
+  input.oninput = () => {
+    const raw = parseFloat(input.value);
+    if (param.includes('Hue')) { state[param] = raw; valSpan.textContent = Math.round(raw) + '°'; }
+    else if (param === 'vignetteMidpoint' || param === 'vignetteRoundness' || param === 'vignetteFeather') { state[param] = raw / 100; valSpan.textContent = Math.round(raw).toString(); }
+    else if (param === 'grainSize' || param === 'sharpenRadius') { state[param] = raw / 100; valSpan.textContent = (raw/100).toFixed(1); }
+    else { state[param] = raw; valSpan.textContent = Math.round(raw).toString(); }
+    pushUndo();
+  };
+});
+
+// Mask controls
+document.querySelectorAll('[data-mask]').forEach(input => {
+  const param = input.dataset.mask;
+  const valSpan = input.nextElementSibling;
+  input.oninput = () => {
+    const raw = parseFloat(input.value);
+    if (param === 'maskFeather') { state[param] = raw / 100; valSpan.textContent = Math.round(raw).toString(); }
+    else if (param === 'maskInvert') { state[param] = raw > 0; valSpan.textContent = raw > 0 ? 'On' : 'Off'; }
+    updateMaskTexture(); drawMaskOverlay();
+  };
+});
+
+document.getElementById('maskEllipse').onclick = function() {
+  state.maskShape = 'ellipse';
+  state.maskCenterX = 0.5; state.maskCenterY = 0.5; state.maskRadiusX = 0.2; state.maskRadiusY = 0.15;
+  this.classList.add('active'); document.getElementById('maskRect').classList.remove('active');
+  maskCanvas.classList.add('active');
+  document.getElementById('maskBadge').style.display = 'block';
+  updateMaskTexture(); drawMaskOverlay();
+};
+document.getElementById('maskRect').onclick = function() {
+  state.maskShape = 'rect';
+  state.maskCenterX = 0.5; state.maskCenterY = 0.5; state.maskRadiusX = 0.2; state.maskRadiusY = 0.15;
+  this.classList.add('active'); document.getElementById('maskEllipse').classList.remove('active');
+  maskCanvas.classList.add('active');
+  document.getElementById('maskBadge').style.display = 'block';
+  updateMaskTexture(); drawMaskOverlay();
+};
+document.getElementById('maskClear').onclick = () => {
+  state.maskShape = null; state.maskEnabled = false;
+  rotoMode = null; rotoMaskData = null; rotoSeedPoints = [];
+  document.getElementById('maskEllipse').classList.remove('active');
+  document.getElementById('maskRect').classList.remove('active');
+  document.getElementById('maskAutoRoto').classList.remove('active');
+  document.getElementById('maskAddPoint').classList.remove('active');
+  document.getElementById('maskSubPoint').classList.remove('active');
+  maskCanvas.classList.remove('active');
+  maskCanvas.classList.remove('roto');
+  document.getElementById('maskBadge').style.display = 'none';
+  document.getElementById('rotoStatus').textContent = 'Tap a subject on the video to auto-mask it';
+  document.getElementById('trackStatus').textContent = 'Create a mask, then track across frames';
+  updateMaskTexture(); drawMaskOverlay();
+};
+
+document.getElementById('maskOverlayToggle').onclick = function() {
+  state.maskShowOverlay = !state.maskShowOverlay;
+  this.textContent = state.maskShowOverlay ? 'ON' : 'OFF';
+  this.classList.toggle('on', state.maskShowOverlay);
+};
+
+// Mask drag interaction
+let maskDragMode = null, maskDragStart = null;
+maskCanvas.addEventListener('pointerdown', (e) => {
+  if (!state.maskShape || state.maskShape === 'roto' || rotoMode) return;
+  const rect = maskCanvas.getBoundingClientRect();
+  const nx = (e.clientX - rect.left) / rect.width;
+  const ny = (e.clientY - rect.top) / rect.height;
+  // Determine drag mode: edge resize vs center move
+  const dx = Math.abs(nx - state.maskCenterX), dy = Math.abs(ny - state.maskCenterY);
+  if (dx < state.maskRadiusX * 0.5 && dy < state.maskRadiusY * 0.5) maskDragMode = 'move';
+  else maskDragMode = 'resize';
+  maskDragStart = { x: nx, y: ny, cx: state.maskCenterX, cy: state.maskCenterY, rx: state.maskRadiusX, ry: state.maskRadiusY };
+  maskCanvas.setPointerCapture(e.pointerId);
+});
+maskCanvas.addEventListener('pointermove', (e) => {
+  if (!maskDragMode || !maskDragStart) return;
+  const rect = maskCanvas.getBoundingClientRect();
+  const nx = (e.clientX - rect.left) / rect.width;
+  const ny = (e.clientY - rect.top) / rect.height;
+  if (maskDragMode === 'move') {
+    state.maskCenterX = maskDragStart.cx + (nx - maskDragStart.x);
+    state.maskCenterY = maskDragStart.cy + (ny - maskDragStart.y);
+  } else {
+    state.maskRadiusX = Math.max(0.02, maskDragStart.rx + (Math.abs(nx - state.maskCenterX) - Math.abs(maskDragStart.x - maskDragStart.cx)));
+    state.maskRadiusY = Math.max(0.02, maskDragStart.ry + (Math.abs(ny - state.maskCenterY) - Math.abs(maskDragStart.y - maskDragStart.cy)));
+  }
+  updateMaskTexture(); drawMaskOverlay();
+});
+maskCanvas.addEventListener('pointerup', () => { maskDragMode = null; maskDragStart = null; });
+
+// ═══════════════════════════════════════════
+// Auto Roto (tap-to-segment)
+// ═══════════════════════════════════════════
+const ROTO_SIZE = 256; // work at this resolution for speed
+let rotoMode = null; // 'add', 'sub', or null
+let rotoMaskData = null; // Uint8Array at ROTO_SIZE x ROTO_SIZE
+let rotoSeedPoints = []; // {x, y, type: 'add'|'sub'}
+
+function readOriginalFrame() {
+  // Read the SOURCE video pixels (before grading) for segmentation
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = ROTO_SIZE; tmpCanvas.height = ROTO_SIZE;
+  const ctx = tmpCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, ROTO_SIZE, ROTO_SIZE);
+  return ctx.getImageData(0, 0, ROTO_SIZE, ROTO_SIZE);
+}
+
+function computeEdgeMap(imgData) {
+  const w = imgData.width, h = imgData.height, d = imgData.data;
+  const edges = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let gx = 0, gy = 0;
+      for (let c = 0; c < 3; c++) {
+        const tl = d[((y-1)*w+(x-1))*4+c], tc = d[((y-1)*w+x)*4+c], tr = d[((y-1)*w+(x+1))*4+c];
+        const ml = d[(y*w+(x-1))*4+c], mr = d[(y*w+(x+1))*4+c];
+        const bl = d[((y+1)*w+(x-1))*4+c], bc = d[((y+1)*w+x)*4+c], br = d[((y+1)*w+(x+1))*4+c];
+        const sx = -tl - 2*ml - bl + tr + 2*mr + br;
+        const sy = -tl - 2*tc - tr + bl + 2*bc + br;
+        gx += sx * sx; gy += sy * sy;
+      }
+      edges[y * w + x] = Math.min(1, Math.sqrt(gx + gy) / 600);
+    }
+  }
+  return edges;
+}
+
+function colorDistance(d, i1, i2) {
+  const dr = d[i1] - d[i2], dg = d[i1+1] - d[i2+1], db = d[i1+2] - d[i2+2];
+  return Math.sqrt(dr*dr + dg*dg + db*db);
+}
+
+function runSegmentation(imgData, seedPoints, threshold, edgeSensitivity) {
+  const w = imgData.width, h = imgData.height, d = imgData.data;
+  const edges = computeEdgeMap(imgData);
+  const mask = new Uint8Array(w * h);
+  const visited = new Uint8Array(w * h);
+
+  // Collect seed colors from 'add' points
+  const addPoints = seedPoints.filter(p => p.type === 'add');
+  const subPoints = seedPoints.filter(p => p.type === 'sub');
+  if (addPoints.length === 0) return mask;
+
+  // Build color model from seed neighborhood (sample 5x5 around each seed)
+  const seedColors = [];
+  addPoints.forEach(p => {
+    const sx = Math.round(p.x * w), sy = Math.round(p.y * h);
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const px = Math.max(0, Math.min(w-1, sx+dx)), py = Math.max(0, Math.min(h-1, sy+dy));
+        const idx = (py * w + px) * 4;
+        seedColors.push([d[idx], d[idx+1], d[idx+2]]);
+      }
+    }
+  });
+
+  // Compute mean and variance of seed colors
+  let mr = 0, mg = 0, mb = 0;
+  seedColors.forEach(c => { mr += c[0]; mg += c[1]; mb += c[2]; });
+  mr /= seedColors.length; mg /= seedColors.length; mb /= seedColors.length;
+
+  // BFS flood fill from all add seed points
+  const queue = [];
+  addPoints.forEach(p => {
+    const sx = Math.max(0, Math.min(w-1, Math.round(p.x * w)));
+    const sy = Math.max(0, Math.min(h-1, Math.round(p.y * h)));
+    const idx = sy * w + sx;
+    queue.push(idx);
+    visited[idx] = 1;
+    mask[idx] = 255;
+  });
+
+  const edgeMul = edgeSensitivity / 100;
+
+  while (queue.length > 0) {
+    const idx = queue.shift();
+    const x = idx % w, y = Math.floor(idx / w);
+    const pi = idx * 4;
+
+    const neighbors = [];
+    if (x > 0) neighbors.push(idx - 1);
+    if (x < w-1) neighbors.push(idx + 1);
+    if (y > 0) neighbors.push(idx - w);
+    if (y < h-1) neighbors.push(idx + w);
+
+    for (const ni of neighbors) {
+      if (visited[ni]) continue;
+      visited[ni] = 1;
+
+      const nx = ni % w, ny = Math.floor(ni / w);
+      const npi = ni * 4;
+
+      // Color distance to seed mean
+      const dr = d[npi] - mr, dg = d[npi+1] - mg, db = d[npi+2] - mb;
+      const colorDist = Math.sqrt(dr*dr + dg*dg + db*db);
+
+      // Local color distance (to current pixel)
+      const localDist = colorDistance(d, pi, npi);
+
+      // Edge strength at this pixel
+      const edgeStr = edges[ni] * edgeMul;
+
+      // Adaptive threshold: lower near edges
+      const adaptThresh = threshold * (1.0 - edgeStr * 0.85);
+
+      // Combined check: must be similar to seed AND to neighbor
+      if (colorDist < adaptThresh && localDist < adaptThresh * 0.7) {
+        mask[ni] = 255;
+        queue.push(ni);
+      }
+    }
+  }
+
+  // Subtract points: remove regions near sub points
+  subPoints.forEach(p => {
+    const sx = Math.round(p.x * w), sy = Math.round(p.y * h);
+    const subQueue = [];
+    const subVisited = new Uint8Array(w * h);
+    const si = sy * w + sx;
+    if (mask[si]) { mask[si] = 0; subQueue.push(si); subVisited[si] = 1; }
+
+    while (subQueue.length > 0) {
+      const idx = subQueue.shift();
+      const x = idx % w, y = Math.floor(idx / w);
+      const pi = idx * 4;
+      const neighbors = [];
+      if (x > 0) neighbors.push(idx - 1);
+      if (x < w-1) neighbors.push(idx + 1);
+      if (y > 0) neighbors.push(idx - w);
+      if (y < h-1) neighbors.push(idx + w);
+      for (const ni of neighbors) {
+        if (subVisited[ni] || !mask[ni]) continue;
+        subVisited[ni] = 1;
+        const npi = ni * 4;
+        const localDist = colorDistance(d, pi, npi);
+        if (localDist < threshold * 0.5) {
+          mask[ni] = 0;
+          subQueue.push(ni);
+        }
+      }
+    }
+  });
+
+  // Morphological close (dilate then erode) to fill gaps
+  const temp = new Uint8Array(w * h);
+  // Dilate
+  for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+    const i = y*w+x;
+    temp[i] = mask[i] || mask[i-1] || mask[i+1] || mask[i-w] || mask[i+w] ? 255 : 0;
+  }
+  // Erode
+  for (let y = 1; y < h-1; y++) for (let x = 1; x < w-1; x++) {
+    const i = y*w+x;
+    mask[i] = (temp[i] && temp[i-1] && temp[i+1] && temp[i-w] && temp[i+w]) ? 255 : 0;
+  }
+
+  return mask;
+}
+
+function blurMask(mask, w, h, radius) {
+  if (radius < 1) return mask;
+  const result = new Uint8Array(w * h);
+  const r = Math.ceil(radius);
+  // Horizontal pass
+  const temp = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, count = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        const nx = x + dx;
+        if (nx >= 0 && nx < w) { sum += mask[y*w+nx]; count++; }
+      }
+      temp[y*w+x] = sum / count;
+    }
+  }
+  // Vertical pass
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, count = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        const ny = y + dy;
+        if (ny >= 0 && ny < h) { sum += temp[ny*w+x]; count++; }
+      }
+      result[y*w+x] = Math.round(sum / count);
+    }
+  }
+  return result;
+}
+
+function applyRotoMask() {
+  if (!rotoMaskData) return;
+  const featherPx = Math.round(state.maskFeather * 8);
+  let finalMask = blurMask(rotoMaskData, ROTO_SIZE, ROTO_SIZE, featherPx);
+  if (state.maskInvert) finalMask = finalMask.map(v => 255 - v);
+
+  // Upload to mask texture at 256x256
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, ROTO_SIZE, ROTO_SIZE, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, finalMask);
+  state.maskEnabled = true;
+  state.maskShape = 'roto';
+  document.getElementById('maskBadge').style.display = 'block';
+  // Save to active layer
+  const layer = getActiveLayer();
+  if (layer) {
+    layer.maskTextureData = new Uint8Array(finalMask);
+    layer.rotoSeedPoints = rotoSeedPoints.map(p => ({...p}));
+    layer.rotoMaskData = new Uint8Array(rotoMaskData);
+  }
+}
+
+function runRotoFromSeeds() {
+  if (!state.videoLoaded || rotoSeedPoints.length === 0) return;
+  const imgData = readOriginalFrame();
+  const threshold = state.rotoThreshold || 30;
+  const edgeSense = state.rotoEdgeSense || 60;
+  rotoMaskData = runSegmentation(imgData, rotoSeedPoints, threshold, edgeSense);
+  applyRotoMask();
+  drawMaskOverlay();
+}
+
+// Auto Roto button handlers
+document.getElementById('maskAutoRoto').onclick = function() {
+  rotoMode = 'add';
+  rotoSeedPoints = [];
+  rotoMaskData = null;
+  this.classList.add('active');
+  document.getElementById('maskAddPoint').classList.remove('active');
+  document.getElementById('maskSubPoint').classList.remove('active');
+  maskCanvas.classList.remove('active');
+  maskCanvas.classList.add('roto');
+  document.getElementById('rotoStatus').textContent = 'Tap on the subject to mask it';
+};
+document.getElementById('maskAddPoint').onclick = function() {
+  rotoMode = 'add';
+  this.classList.add('active');
+  document.getElementById('maskSubPoint').classList.remove('active');
+  document.getElementById('maskAutoRoto').classList.remove('active');
+  maskCanvas.classList.remove('active');
+  maskCanvas.classList.add('roto');
+  document.getElementById('rotoStatus').textContent = 'Tap to add to selection';
+};
+document.getElementById('maskSubPoint').onclick = function() {
+  rotoMode = 'sub';
+  this.classList.add('active');
+  document.getElementById('maskAddPoint').classList.remove('active');
+  document.getElementById('maskAutoRoto').classList.remove('active');
+  maskCanvas.classList.remove('active');
+  maskCanvas.classList.add('roto');
+  document.getElementById('rotoStatus').textContent = 'Tap to subtract from selection';
+};
+
+// Roto threshold/edge sense
+state.rotoThreshold = 30;
+state.rotoEdgeSense = 60;
+document.querySelectorAll('[data-mask="rotoThreshold"]').forEach(i => {
+  i.oninput = () => { state.rotoThreshold = parseFloat(i.value); i.nextElementSibling.textContent = Math.round(i.value); if (rotoSeedPoints.length) runRotoFromSeeds(); };
+});
+document.querySelectorAll('[data-mask="rotoEdgeSense"]').forEach(i => {
+  i.oninput = () => { state.rotoEdgeSense = parseFloat(i.value); i.nextElementSibling.textContent = Math.round(i.value); if (rotoSeedPoints.length) runRotoFromSeeds(); };
+});
+
+// Handle tap on mask canvas for roto
+maskCanvas.addEventListener('pointerdown', (e) => {
+  if (!rotoMode) return;
+  if (!state.videoLoaded) return;
+  const rect = maskCanvas.getBoundingClientRect();
+  const nx = (e.clientX - rect.left) / rect.width;
+  const ny = (e.clientY - rect.top) / rect.height;
+
+  rotoSeedPoints.push({ x: nx, y: ny, type: rotoMode });
+  document.getElementById('rotoStatus').textContent = `Processing... (${rotoSeedPoints.length} points)`;
+
+  // Defer to let UI update
+  requestAnimationFrame(() => {
+    runRotoFromSeeds();
+    const addCount = rotoSeedPoints.filter(p => p.type === 'add').length;
+    const subCount = rotoSeedPoints.filter(p => p.type === 'sub').length;
+    document.getElementById('rotoStatus').textContent = `Mask active (${addCount} add, ${subCount} sub points)`;
+  });
+}, { capture: true });
+
+// ═══════════════════════════════════════════
+// Tracking (roto-aware)
+// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// Source-Video Tracking (reads ungraded pixels)
+// ═══════════════════════════════════════════
+const trackCanvas = document.createElement('canvas');
+const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
+
+function getSourcePatch(cx, cy, patchSize) {
+  // Read from SOURCE video (ungraded) for stable tracking
+  const vw = video.videoWidth, vh = video.videoHeight;
+  trackCanvas.width = vw; trackCanvas.height = vh;
+  trackCtx.drawImage(video, 0, 0);
+  const px = Math.round(cx * vw), py = Math.round(cy * vh);
+  const half = Math.round(patchSize / 2);
+  const x0 = Math.max(0, px - half), y0 = Math.max(0, py - half);
+  const sw = Math.min(patchSize, vw - x0), sh = Math.min(patchSize, vh - y0);
+  const imgData = trackCtx.getImageData(x0, y0, sw, sh);
+  return { pixels: imgData.data, x0, y0, sw, sh, cx: px, cy: py };
+}
+
+function matchTemplateSource(ref, searchCx, searchCy, searchRange) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  trackCanvas.width = vw; trackCanvas.height = vh;
+  trackCtx.drawImage(video, 0, 0);
+
+  const searchPx = Math.round(searchRange * Math.max(vw, vh));
+  const cx = Math.round(searchCx * vw), cy = Math.round(searchCy * vh);
+  const half = Math.round(ref.sw / 2);
+
+  let bestSSD = Infinity, bestDx = 0, bestDy = 0;
+
+  // Coarse pass (step 4)
+  for (let dy = -searchPx; dy <= searchPx; dy += 4) {
+    for (let dx = -searchPx; dx <= searchPx; dx += 4) {
+      const x0 = cx + dx - half, y0 = cy + dy - half;
+      if (x0 < 0 || y0 < 0 || x0 + ref.sw > vw || y0 + ref.sh > vh) continue;
+      const imgData = trackCtx.getImageData(x0, y0, ref.sw, ref.sh);
+      let ssd = 0;
+      // Sample every 2nd pixel for speed
+      for (let i = 0; i < imgData.data.length; i += 8) {
+        const dr = imgData.data[i] - ref.pixels[i], dg = imgData.data[i+1] - ref.pixels[i+1], db = imgData.data[i+2] - ref.pixels[i+2];
+        ssd += dr*dr + dg*dg + db*db;
+      }
+      if (ssd < bestSSD) { bestSSD = ssd; bestDx = dx; bestDy = dy; }
+    }
+  }
+
+  // Fine pass (step 1, around coarse best)
+  const fineDx = bestDx, fineDy = bestDy;
+  for (let dy = fineDy - 4; dy <= fineDy + 4; dy++) {
+    for (let dx = fineDx - 4; dx <= fineDx + 4; dx++) {
+      const x0 = cx + dx - half, y0 = cy + dy - half;
+      if (x0 < 0 || y0 < 0 || x0 + ref.sw > vw || y0 + ref.sh > vh) continue;
+      const imgData = trackCtx.getImageData(x0, y0, ref.sw, ref.sh);
+      let ssd = 0;
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const dr = imgData.data[i] - ref.pixels[i], dg = imgData.data[i+1] - ref.pixels[i+1], db = imgData.data[i+2] - ref.pixels[i+2];
+        ssd += dr*dr + dg*dg + db*db;
+      }
+      if (ssd < bestSSD) { bestSSD = ssd; bestDx = dx; bestDy = dy; }
+    }
+  }
+
+  return { dx: bestDx / vw, dy: bestDy / vh };
+}
+
+function getMaskCentroid() {
+  if (!rotoMaskData) return { x: state.maskCenterX, y: state.maskCenterY };
+  let sumX = 0, sumY = 0, total = 0;
+  for (let y = 0; y < ROTO_SIZE; y++) {
+    for (let x = 0; x < ROTO_SIZE; x++) {
+      if (rotoMaskData[y * ROTO_SIZE + x] > 128) { sumX += x; sumY += y; total++; }
+    }
+  }
+  if (total === 0) return { x: 0.5, y: 0.5 };
+  return { x: sumX / total / ROTO_SIZE, y: sumY / total / ROTO_SIZE };
+}
+
+// Reliable seek that works on iOS Safari
+function seekAndWait(targetTime) {
+  return new Promise(resolve => {
+    const onSeeked = () => {
+      video.removeEventListener('seeked', onSeeked);
+      clearTimeout(fallback);
+      resolve();
+    };
+    // Fallback timeout in case seeked never fires (iOS Safari quirk)
+    const fallback = setTimeout(() => {
+      video.removeEventListener('seeked', onSeeked);
+      resolve();
+    }, 300);
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = targetTime;
+  });
+}
+
+async function trackDirection(forward) {
+  if (!state.videoLoaded) return;
+  const hasRotoMask = state.maskShape === 'roto' && rotoMaskData;
+  const isRoto = hasRotoMask && rotoSeedPoints.length > 0;
+  const isShape = state.maskShape === 'ellipse' || state.maskShape === 'rect';
+  if (!isRoto && !isShape) {
+    document.getElementById('trackStatus').textContent = isRoto === false && hasRotoMask ? 'Re-tap a point on the subject first, then track' : 'Select a mask shape or create a roto mask first';
+    return;
+  }
+
+  const status = document.getElementById('trackStatus');
+  const fps = 24, frameDuration = 1 / fps;
+  const totalFrames = forward ? Math.floor((video.duration - video.currentTime) * fps) : Math.floor(video.currentTime * fps);
+  const maxFrames = Math.min(totalFrames, 150);
+  if (maxFrames <= 0) { status.textContent = 'No frames to track in this direction'; return; }
+  status.textContent = `Tracking... 0/${maxFrames}`;
+
+  if (isRoto) {
+    const centroid = getMaskCentroid();
+    const patchSize = 80;
+    let ref = getSourcePatch(centroid.x, centroid.y, patchSize);
+
+    for (let i = 0; i < maxFrames; i++) {
+      const newTime = video.currentTime + (forward ? frameDuration : -frameDuration);
+      if (newTime < 0 || newTime > video.duration) break;
+      await seekAndWait(newTime);
+
+      const prevCentroid = getMaskCentroid();
+      const offset = matchTemplateSource(ref, prevCentroid.x, prevCentroid.y, 0.12);
+
+      rotoSeedPoints.forEach(p => { p.x += offset.dx; p.y += offset.dy; });
+      runRotoFromSeeds();
+
+      const newCentroid = getMaskCentroid();
+      ref = getSourcePatch(newCentroid.x, newCentroid.y, patchSize);
+
+      status.textContent = `Tracking... ${i+1}/${maxFrames}`;
+      if (i % 3 === 0) await new Promise(r => requestAnimationFrame(r));
+    }
+  } else {
+    const patchSize = 64;
+    let ref = getSourcePatch(state.maskCenterX, state.maskCenterY, patchSize);
+
+    for (let i = 0; i < maxFrames; i++) {
+      const newTime = video.currentTime + (forward ? frameDuration : -frameDuration);
+      if (newTime < 0 || newTime > video.duration) break;
+      await seekAndWait(newTime);
+
+      const offset = matchTemplateSource(ref, state.maskCenterX, state.maskCenterY, 0.1);
+      state.maskCenterX += offset.dx;
+      state.maskCenterY += offset.dy;
+      ref = getSourcePatch(state.maskCenterX, state.maskCenterY, patchSize);
+
+      updateMaskTexture(); drawMaskOverlay();
+      status.textContent = `Tracking... ${i+1}/${maxFrames}`;
+      if (i % 3 === 0) await new Promise(r => requestAnimationFrame(r));
+    }
+  }
+  status.textContent = `Tracked ${maxFrames} frames ✓`;
+}
+
+document.getElementById('trackForward').onclick = () => trackDirection(true);
+document.getElementById('trackBackward').onclick = () => trackDirection(false);
+
+// ═══════════════════════════════════════════
+// Before/After
+// ═══════════════════════════════════════════
+const vc = document.getElementById('videoContainer');
+let pressTimer;
+vc.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('.transport') || e.target.closest('#maskCanvas.active')) return;
+  pressTimer = setTimeout(() => { state.showOriginal = true; document.getElementById('originalBadge').style.display = 'block'; }, 150);
+});
+vc.addEventListener('pointerup', () => { clearTimeout(pressTimer); state.showOriginal = false; document.getElementById('originalBadge').style.display = 'none'; });
+vc.addEventListener('pointerleave', () => { clearTimeout(pressTimer); state.showOriginal = false; document.getElementById('originalBadge').style.display = 'none'; });
+
+// ═══════════════════════════════════════════
+// Reset
+// ═══════════════════════════════════════════
+document.getElementById('resetBtn').onclick = () => {
+  // Reset active layer
+  const defaults = {
+    temperature:0, tint:0, exposure:0, contrast:0, highlights:0, shadows:0, whites:0, blacks:0,
+    saturation:1.0, vibrance:0, liftX:0,liftY:0,liftMaster:0,gammaX:0,gammaY:0,gammaMaster:0,gainX:0,gainY:0,gainMaster:0,
+    hslHueCenter:0, hslHueWidth:30, hslSoftness:20, hslSatMin:0, hslSatMax:1, hslLumMin:0, hslLumMax:1,
+    hslHueShift:0, hslSatAdjust:0, hslLumAdjust:0, hslShowMask:false,
+    splitShadowHue:220, splitShadowSat:0, splitHighlightHue:40, splitHighlightSat:0, splitBalance:0,
+    vignetteAmount:0, vignetteMidpoint:0.5, vignetteRoundness:0.5, vignetteFeather:0.5,
+    grainAmount:0, grainSize:1.0, sharpenAmount:0, sharpenRadius:1.0,
+    maskEnabled:false, maskShape:null, maskShowOverlay:false,
+  };
+  Object.keys(defaults).forEach(k => { state[k] = defaults[k]; });
+  state.curves = { master:[{x:0,y:0},{x:1,y:1}], red:[{x:0,y:0},{x:1,y:1}], green:[{x:0,y:0},{x:1,y:1}], blue:[{x:0,y:0},{x:1,y:1}] };
+  // Reset all slider UIs
+  document.querySelectorAll('#panel-basic input[type=range]').forEach(input => {
+    const param = input.dataset.param;
+    input.value = param === 'saturation' ? 100 : 0;
+    input.nextElementSibling.textContent = param === 'saturation' ? '100' : param === 'exposure' ? '0.00' : '0';
+  });
+  document.querySelectorAll('[data-hsl]').forEach(i => {
+    const def = { hslHueCenter:'0', hslHueWidth:'30', hslSoftness:'20', hslSatMin:'0', hslSatMax:'100', hslLumMin:'0', hslLumMax:'100', hslHueShift:'0', hslSatAdjust:'0', hslLumAdjust:'0' };
+    i.value = def[i.dataset.hsl] || '0';
+    const v = i.nextElementSibling;
+    if (i.dataset.hsl.includes('Hue') || i.dataset.hsl === 'hslHueShift') v.textContent = i.value + '°'; else v.textContent = i.value;
+  });
+  document.querySelectorAll('[data-fx]').forEach(i => {
+    const def = { splitShadowHue:'220', splitShadowSat:'0', splitHighlightHue:'40', splitHighlightSat:'0', splitBalance:'0',
+      vignetteAmount:'0', vignetteMidpoint:'50', vignetteRoundness:'50', vignetteFeather:'50',
+      grainAmount:'0', grainSize:'100', sharpenAmount:'0', sharpenRadius:'100' };
+    i.value = def[i.dataset.fx] || '0';
+    const v = i.nextElementSibling;
+    if (i.dataset.fx.includes('Hue')) v.textContent = i.value + '°';
+    else if (i.dataset.fx === 'grainSize' || i.dataset.fx === 'sharpenRadius') v.textContent = (parseInt(i.value)/100).toFixed(1);
+    else v.textContent = i.value;
+  });
+  document.querySelectorAll('[data-wheel]').forEach(i => { i.value = 0; });
+  document.querySelectorAll('.master-val').forEach(v => { v.textContent = '0.00'; });
+  document.getElementById('hslMaskToggle').textContent = 'OFF'; document.getElementById('hslMaskToggle').classList.remove('on');
+  document.getElementById('maskEllipse').classList.remove('active'); document.getElementById('maskRect').classList.remove('active');
+  maskCanvas.classList.remove('active'); document.getElementById('maskBadge').style.display = 'none';
+  document.getElementById('maskOverlayToggle').textContent = 'OFF'; document.getElementById('maskOverlayToggle').classList.remove('on');
+  // Clear roto state for active layer
+  rotoMode = null; rotoMaskData = null; rotoSeedPoints = [];
+  const activeL = getActiveLayer();
+  if (activeL) { activeL.rotoSeedPoints = []; activeL.rotoMaskData = null; activeL.maskTextureData = null; }
+  syncCurvesToActiveLayer();
+  updateCurveLUT(); updateMaskTexture(); drawCurveEditor(); drawAllWheels(); drawMaskOverlay();
+  renderLayersList();
+  pushUndo();
+};
+
+// ═══════════════════════════════════════════
+// Curve Editor
+// ═══════════════════════════════════════════
+const curveCanvas = document.getElementById('curveCanvas');
+const curveCtx = curveCanvas.getContext('2d');
+let draggingPoint = -1;
+
+function drawCurveEditor() {
+  const w = curveCanvas.clientWidth * 2, h = curveCanvas.clientHeight * 2;
+  curveCanvas.width = w; curveCanvas.height = h;
+  const ctx = curveCtx; ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) { const p=w*i/4; ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,h); ctx.stroke(); const q=h*i/4; ctx.beginPath(); ctx.moveTo(0,q); ctx.lineTo(w,q); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(w,0); ctx.stroke();
+  const pts = state.curves[state.activeCurveChannel], lut = generateCurveLUT(pts);
+  const colors = { master:'#fff', red:'#f87171', green:'#4ade80', blue:'#60a5fa' };
+  ctx.strokeStyle = colors[state.activeCurveChannel]; ctx.lineWidth = 3; ctx.beginPath();
+  for (let i = 0; i < 256; i++) { const x=(i/255)*w, y=(1-lut[i])*h; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); } ctx.stroke();
+  pts.forEach(pt => { ctx.fillStyle = colors[state.activeCurveChannel]; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(pt.x*w,(1-pt.y)*h,7,0,Math.PI*2); ctx.fill(); ctx.stroke(); });
+}
+
+document.querySelectorAll('.channel-selector button').forEach(btn => {
+  btn.onclick = () => { document.querySelectorAll('.channel-selector button').forEach(b => b.classList.remove('active')); btn.classList.add('active'); state.activeCurveChannel = btn.dataset.ch; drawCurveEditor(); };
+});
+
+curveCanvas.addEventListener('pointerdown', (e) => {
+  const rect = curveCanvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width, y = 1 - (e.clientY - rect.top) / rect.height;
+  const pts = state.curves[state.activeCurveChannel]; draggingPoint = -1;
+  for (let i = 0; i < pts.length; i++) { if (Math.abs(pts[i].x-x)<0.04 && Math.abs(pts[i].y-y)<0.04) { draggingPoint = i; break; } }
+  if (draggingPoint === -1 && x > 0.02 && x < 0.98) { pts.push({x,y}); pts.sort((a,b)=>a.x-b.x); draggingPoint = pts.findIndex(p=>Math.abs(p.x-x)<0.01); updateCurveLUT(); drawCurveEditor(); }
+  curveCanvas.setPointerCapture(e.pointerId);
+});
+curveCanvas.addEventListener('pointermove', (e) => {
+  if (draggingPoint < 0) return;
+  const rect = curveCanvas.getBoundingClientRect();
+  const x = Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width)), y = Math.max(0,Math.min(1,1-(e.clientY-rect.top)/rect.height));
+  const pts = state.curves[state.activeCurveChannel];
+  if (draggingPoint === 0) pts[0] = {x:0,y}; else if (draggingPoint === pts.length-1) pts[draggingPoint] = {x:1,y}; else pts[draggingPoint] = {x,y};
+  updateCurveLUT(); drawCurveEditor();
+});
+curveCanvas.addEventListener('pointerup', () => { draggingPoint = -1; pushUndo(); });
+
+// ═══════════════════════════════════════════
+// Color Wheels
+// ═══════════════════════════════════════════
+function drawWheel(canvasId, x, y) {
+  const c = document.getElementById(canvasId), size = c.clientWidth * 2;
+  c.width = size; c.height = size; const ctx = c.getContext('2d'), r = size / 2;
+  const grad = ctx.createConicGradient(0, r, r);
+  grad.addColorStop(0,'rgba(255,0,0,0.2)'); grad.addColorStop(0.17,'rgba(255,255,0,0.2)'); grad.addColorStop(0.33,'rgba(0,255,0,0.2)');
+  grad.addColorStop(0.5,'rgba(0,255,255,0.2)'); grad.addColorStop(0.67,'rgba(0,0,255,0.2)'); grad.addColorStop(0.83,'rgba(255,0,255,0.2)'); grad.addColorStop(1,'rgba(255,0,0,0.2)');
+  ctx.beginPath(); ctx.arc(r,r,r,0,Math.PI*2); ctx.fillStyle = grad; ctx.fill();
+  const rgrad = ctx.createRadialGradient(r,r,0,r,r,r);
+  rgrad.addColorStop(0,'rgba(0,0,0,0.6)'); rgrad.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(r,r,r,0,Math.PI*2); ctx.fillStyle = rgrad; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(r,0); ctx.lineTo(r,size); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,r); ctx.lineTo(size,r); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.beginPath(); ctx.arc(r,r,2,0,Math.PI*2); ctx.fill();
+  const dotX = r + x * r * 0.9, dotY = r - y * r * 0.9;
+  if (Math.abs(x)>0.01||Math.abs(y)>0.01) { ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(r,r); ctx.lineTo(dotX,dotY); ctx.stroke(); }
+  ctx.fillStyle = 'white'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 4;
+  ctx.beginPath(); ctx.arc(dotX,dotY,7,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0; ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke();
+}
+function drawAllWheels() { drawWheel('wheelLift',state.liftX,state.liftY); drawWheel('wheelGamma',state.gammaX,state.gammaY); drawWheel('wheelGain',state.gainX,state.gainY); }
+function setupWheelDrag(canvasId, prefix) {
+  const c = document.getElementById(canvasId); let dragging = false;
+  function handleMove(e) { if (!dragging) return; const rect=c.getBoundingClientRect(), r=rect.width/2; let dx=(e.clientX-rect.left-r)/(r*0.9), dy=-(e.clientY-rect.top-r)/(r*0.9); const dist=Math.sqrt(dx*dx+dy*dy); if(dist>1){dx/=dist;dy/=dist;} state[prefix+'X']=dx; state[prefix+'Y']=dy; drawWheel(canvasId,dx,dy); }
+  c.addEventListener('pointerdown', (e) => { dragging=true; c.setPointerCapture(e.pointerId); handleMove(e); });
+  c.addEventListener('pointermove', handleMove);
+  c.addEventListener('pointerup', () => { dragging=false; pushUndo(); });
+  let lastTap = 0;
+  c.addEventListener('pointerdown', () => { const now=Date.now(); if(now-lastTap<300){state[prefix+'X']=0;state[prefix+'Y']=0;drawWheel(canvasId,0,0);} lastTap=now; });
+}
+setupWheelDrag('wheelLift','lift'); setupWheelDrag('wheelGamma','gamma'); setupWheelDrag('wheelGain','gain');
+document.querySelectorAll('[data-wheel]').forEach(input => {
+  const prefix = input.dataset.wheel.replace('-master','');
+  input.oninput = () => { const val=parseFloat(input.value)/100; state[prefix+'Master']=val; document.getElementById(prefix+'Val').textContent=val.toFixed(2); pushUndo(); };
+});
+
+// ═══════════════════════════════════════════
+// LUT
+// ═══════════════════════════════════════════
+document.getElementById('lutImportBtn').onclick = () => document.getElementById('lutInput').click();
+document.getElementById('lutInput').onchange = (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { const lut = parseCubeLUT(reader.result); if (lut) { uploadLUT3D(lut); document.getElementById('lutName').textContent=file.name.replace('.cube',''); document.getElementById('lutStatus').textContent=`3D LUT Active (${lut.size}³)`; document.getElementById('lutIntensityRow').classList.remove('hidden'); document.getElementById('lutRemoveBtn').classList.remove('hidden'); } };
+  reader.readAsText(file);
+};
+document.getElementById('lutRemoveBtn').onclick = () => { state.lutEnabled=false; document.getElementById('lutName').textContent='No LUT loaded'; document.getElementById('lutStatus').textContent='Import a .cube LUT file'; document.getElementById('lutIntensityRow').classList.add('hidden'); document.getElementById('lutRemoveBtn').classList.add('hidden'); };
+const lutIntInput = document.querySelector('[data-param="lutIntensity"]');
+if (lutIntInput) lutIntInput.oninput = () => { state.lutIntensity=parseFloat(lutIntInput.value)/100; lutIntInput.nextElementSibling.textContent=lutIntInput.value+'%'; };
+
+// ═══════════════════════════════════════════
+// Presets
+// ═══════════════════════════════════════════
+const PRESET_KEYS = ['temperature','tint','exposure','contrast','highlights','shadows','whites','blacks','saturation','vibrance',
+  'liftX','liftY','liftMaster','gammaX','gammaY','gammaMaster','gainX','gainY','gainMaster',
+  'hslHueCenter','hslHueWidth','hslSoftness','hslSatMin','hslSatMax','hslLumMin','hslLumMax','hslHueShift','hslSatAdjust','hslLumAdjust',
+  'splitShadowHue','splitShadowSat','splitHighlightHue','splitHighlightSat','splitBalance',
+  'vignetteAmount','vignetteMidpoint','vignetteRoundness','vignetteFeather','grainAmount','grainSize','sharpenAmount','sharpenRadius'];
+
+function getPresets() { try { return JSON.parse(localStorage.getItem('gradecam_presets') || '[]'); } catch { return []; } }
+function savePresets(p) { localStorage.setItem('gradecam_presets', JSON.stringify(p)); }
+
+// Gauge grain profiles (amount, size)
+const GAUGE = {
+  '8mm':  { grainAmount: 55, grainSize: 2.2 },
+  '16mm': { grainAmount: 30, grainSize: 1.6 },
+  '35mm': { grainAmount: 12, grainSize: 1.0 },
+  '65mm': { grainAmount: 5, grainSize: 0.7 },
+};
+
+// Helper to create gauge variants of a stock
+function gaugeVariants(name, base, gauges) {
+  return gauges.map(g => ({
+    name: `${name} (${g})`,
+    gauge: g,
+    cat: base.cat,
+    data: { ...base.data, ...GAUGE[g] }
+  }));
+}
+
+// ═══════════════════════════════════════════
+// FILM STOCK LIBRARY
+// ═══════════════════════════════════════════
+const FILM_STOCKS = [
+
+  // ── KODAK VISION3 (Modern Motion Picture) ──
+  ...gaugeVariants('Vision3 250D', { cat: 'Vision3', data: {
+    temperature: 8, tint: 2, contrast: 12, highlights: -8, shadows: 10, whites: -5, blacks: -8,
+    saturation: 0.92, vibrance: 8,
+    splitShadowHue: 30, splitShadowSat: 12, splitHighlightHue: 45, splitHighlightSat: 8, splitBalance: -10,
+    vignetteAmount: 8, vignetteMidpoint: 0.55, vignetteFeather: 0.6,
+    sharpenAmount: -5, sharpenRadius: 1.2,
+  }}, ['8mm','16mm','35mm']),
+
+  ...gaugeVariants('Vision3 50D', { cat: 'Vision3', data: {
+    temperature: 5, tint: 1, contrast: 15, highlights: -5, shadows: 8, whites: -3, blacks: -5,
+    saturation: 1.05, vibrance: 12,
+    splitShadowHue: 25, splitShadowSat: 8, splitHighlightHue: 42, splitHighlightSat: 6, splitBalance: -5,
+    vignetteAmount: 5, vignetteMidpoint: 0.6, vignetteFeather: 0.65,
+    sharpenAmount: 10, sharpenRadius: 0.8,
+  }}, ['16mm','35mm']),
+
+  ...gaugeVariants('Vision3 500T', { cat: 'Vision3', data: {
+    temperature: -8, tint: -2, contrast: 10, highlights: -10, shadows: 15, whites: -8, blacks: -10,
+    saturation: 0.88, vibrance: 5,
+    splitShadowHue: 210, splitShadowSat: 15, splitHighlightHue: 38, splitHighlightSat: 10, splitBalance: -15,
+    vignetteAmount: 10, vignetteMidpoint: 0.5, vignetteFeather: 0.55,
+    sharpenAmount: -8, sharpenRadius: 1.3,
+  }}, ['8mm','16mm','35mm']),
+
+  ...gaugeVariants('Vision3 200T', { cat: 'Vision3', data: {
+    temperature: -5, tint: -1, contrast: 14, highlights: -6, shadows: 12, whites: -4, blacks: -7,
+    saturation: 0.9, vibrance: 6,
+    splitShadowHue: 215, splitShadowSat: 12, splitHighlightHue: 40, splitHighlightSat: 8, splitBalance: -10,
+    vignetteAmount: 7, vignetteMidpoint: 0.55, vignetteFeather: 0.6,
+    sharpenAmount: -3, sharpenRadius: 1.0,
+  }}, ['16mm','35mm']),
+
+  // ── BLEACH BYPASS ──
+  { name: 'Bleach Bypass 100%', cat: 'Bleach Bypass', data: {
+    contrast: 45, highlights: -15, shadows: 20, whites: -10, blacks: -20,
+    saturation: 0.3, vibrance: -15,
+    splitShadowHue: 210, splitShadowSat: 8, splitHighlightHue: 45, splitHighlightSat: 5, splitBalance: 0,
+    grainAmount: 25, grainSize: 1.2, sharpenAmount: 40, sharpenRadius: 1.0,
+    vignetteAmount: 15, vignetteMidpoint: 0.45, vignetteFeather: 0.5,
+  }},
+  { name: 'Bleach Bypass 60%', cat: 'Bleach Bypass', data: {
+    contrast: 30, highlights: -10, shadows: 15, whites: -6, blacks: -12,
+    saturation: 0.5, vibrance: -8,
+    splitShadowHue: 210, splitShadowSat: 6, splitHighlightHue: 45, splitHighlightSat: 4,
+    grainAmount: 18, grainSize: 1.1, sharpenAmount: 25, sharpenRadius: 1.0,
+    vignetteAmount: 10, vignetteMidpoint: 0.5, vignetteFeather: 0.55,
+  }},
+  { name: 'Bleach Bypass 30%', cat: 'Bleach Bypass', data: {
+    contrast: 18, highlights: -5, shadows: 8, whites: -3, blacks: -6,
+    saturation: 0.7, vibrance: -4,
+    splitShadowHue: 210, splitShadowSat: 4, splitHighlightHue: 45, splitHighlightSat: 3,
+    grainAmount: 12, grainSize: 1.0, sharpenAmount: 15, sharpenRadius: 1.0,
+  }},
+
+  // ── EKTACHROME (Cross-Processed Motion Picture) ──
+  { name: 'Ektachrome (Printed)', cat: 'Ektachrome', data: {
+    temperature: -5, tint: 8, contrast: 25, highlights: -15, shadows: -5, blacks: -15,
+    saturation: 1.15, vibrance: 20,
+    splitShadowHue: 260, splitShadowSat: 22, splitHighlightHue: 55, splitHighlightSat: 18, splitBalance: 10,
+    grainAmount: 22, grainSize: 1.3, sharpenAmount: 20, sharpenRadius: 0.9,
+    vignetteAmount: 12, vignetteMidpoint: 0.5, vignetteFeather: 0.5,
+  }},
+  { name: 'Ektachrome (Standard)', cat: 'Ektachrome', data: {
+    temperature: -3, tint: 5, contrast: 20, highlights: -10, shadows: -3, blacks: -10,
+    saturation: 1.1, vibrance: 15,
+    splitShadowHue: 255, splitShadowSat: 18, splitHighlightHue: 50, splitHighlightSat: 14, splitBalance: 5,
+    grainAmount: 18, grainSize: 1.2, sharpenAmount: 15, sharpenRadius: 1.0,
+  }},
+  { name: 'Ektachrome (Telecine)', cat: 'Ektachrome', data: {
+    temperature: -2, tint: 3, contrast: 15, highlights: -8, shadows: 5, blacks: -8,
+    saturation: 1.05, vibrance: 10,
+    splitShadowHue: 250, splitShadowSat: 12, splitHighlightHue: 48, splitHighlightSat: 10,
+    grainAmount: 15, grainSize: 1.1, sharpenAmount: 10, sharpenRadius: 1.0,
+  }},
+
+  // ── STILL PHOTO: PORTRAIT ──
+  { name: 'Portra 160', cat: 'Still Photo', data: {
+    temperature: 5, tint: 3, contrast: 5, highlights: -3, shadows: 8, whites: 5, blacks: -3,
+    saturation: 0.88, vibrance: 12,
+    splitShadowHue: 35, splitShadowSat: 10, splitHighlightHue: 48, splitHighlightSat: 6, splitBalance: -5,
+    grainAmount: 8, grainSize: 0.9, sharpenAmount: 5, sharpenRadius: 0.8,
+  }},
+  { name: 'Portra 400', cat: 'Still Photo', data: {
+    temperature: 6, tint: 4, contrast: 8, highlights: -5, shadows: 10, whites: 3, blacks: -5,
+    saturation: 0.85, vibrance: 15,
+    splitShadowHue: 32, splitShadowSat: 14, splitHighlightHue: 50, splitHighlightSat: 8, splitBalance: -8,
+    grainAmount: 14, grainSize: 1.0, sharpenAmount: 3, sharpenRadius: 0.9,
+  }},
+  { name: 'Portra 800', cat: 'Still Photo', data: {
+    temperature: 8, tint: 5, contrast: 10, highlights: -8, shadows: 15, whites: 2, blacks: -8,
+    saturation: 0.82, vibrance: 10,
+    splitShadowHue: 30, splitShadowSat: 18, splitHighlightHue: 48, splitHighlightSat: 10, splitBalance: -12,
+    grainAmount: 22, grainSize: 1.2, sharpenAmount: -3, sharpenRadius: 1.0,
+  }},
+  { name: 'Pro 400H', cat: 'Still Photo', data: {
+    temperature: -3, tint: 5, contrast: 5, highlights: 3, shadows: 10, whites: 5, blacks: -3,
+    saturation: 0.82, vibrance: 8,
+    splitShadowHue: 180, splitShadowSat: 12, splitHighlightHue: 55, splitHighlightSat: 6, splitBalance: -5,
+    grainAmount: 12, grainSize: 1.0,
+  }},
+
+  // ── STILL PHOTO: CINESTILL ──
+  { name: 'CineStill 800T', cat: 'Still Photo', data: {
+    temperature: -12, tint: -3, contrast: 15, highlights: 5, shadows: 10, whites: 5, blacks: -12,
+    saturation: 0.95, vibrance: 15,
+    splitShadowHue: 200, splitShadowSat: 25, splitHighlightHue: 35, splitHighlightSat: 20, splitBalance: -15,
+    grainAmount: 20, grainSize: 1.2,
+    vignetteAmount: 12, vignetteMidpoint: 0.5, vignetteFeather: 0.5,
+  }},
+  { name: 'CineStill 400D', cat: 'Still Photo', data: {
+    temperature: 5, tint: 2, contrast: 12, highlights: 3, shadows: 8, blacks: -8,
+    saturation: 0.95, vibrance: 12,
+    splitShadowHue: 35, splitShadowSat: 15, splitHighlightHue: 42, splitHighlightSat: 12, splitBalance: -5,
+    grainAmount: 15, grainSize: 1.1,
+  }},
+  { name: 'CineStill 50D', cat: 'Still Photo', data: {
+    temperature: 6, tint: 1, contrast: 14, highlights: -2, shadows: 5, blacks: -5,
+    saturation: 1.02, vibrance: 15,
+    splitShadowHue: 30, splitShadowSat: 8, splitHighlightHue: 40, splitHighlightSat: 8,
+    grainAmount: 6, grainSize: 0.8,
+  }},
+
+  // ── STILL PHOTO: CLASSIC CONSUMER ──
+  { name: 'Kodak Gold 200', cat: 'Still Photo', data: {
+    temperature: 15, tint: 5, contrast: 18, highlights: -5, shadows: 5, blacks: -10,
+    saturation: 1.1, vibrance: 18,
+    splitShadowHue: 35, splitShadowSat: 20, splitHighlightHue: 50, splitHighlightSat: 15, splitBalance: -5,
+    grainAmount: 16, grainSize: 1.1,
+  }},
+  { name: 'Fuji Superia 400', cat: 'Still Photo', data: {
+    temperature: -5, tint: 8, contrast: 15, highlights: -3, shadows: 8, blacks: -8,
+    saturation: 0.95, vibrance: 10,
+    splitShadowHue: 160, splitShadowSat: 15, splitHighlightHue: 55, splitHighlightSat: 10, splitBalance: 5,
+    grainAmount: 18, grainSize: 1.1,
+  }},
+  { name: 'Kodak UltraMax 400', cat: 'Still Photo', data: {
+    temperature: 10, tint: 3, contrast: 20, highlights: -5, shadows: 3, blacks: -12,
+    saturation: 1.12, vibrance: 20,
+    splitShadowHue: 30, splitShadowSat: 18, splitHighlightHue: 45, splitHighlightSat: 12,
+    grainAmount: 18, grainSize: 1.15,
+  }},
+  { name: 'Kodak ColorPlus 200', cat: 'Still Photo', data: {
+    temperature: 12, tint: 4, contrast: 16, highlights: -3, shadows: 5, blacks: -8,
+    saturation: 1.05, vibrance: 15,
+    splitShadowHue: 32, splitShadowSat: 16, splitHighlightHue: 48, splitHighlightSat: 10,
+    grainAmount: 14, grainSize: 1.0,
+  }},
+  { name: 'Fujicolor 200', cat: 'Still Photo', data: {
+    temperature: -3, tint: 6, contrast: 14, highlights: -2, shadows: 6, blacks: -6,
+    saturation: 0.95, vibrance: 12,
+    splitShadowHue: 155, splitShadowSat: 10, splitHighlightHue: 60, splitHighlightSat: 8,
+    grainAmount: 12, grainSize: 1.0,
+  }},
+
+  // ── STILL PHOTO: VIVID ──
+  { name: 'Ektar 100', cat: 'Still Photo', data: {
+    temperature: 3, tint: 2, contrast: 22, highlights: -8, shadows: 5, blacks: -10,
+    saturation: 1.25, vibrance: 25,
+    splitShadowHue: 220, splitShadowSat: 8, splitHighlightHue: 45, splitHighlightSat: 5,
+    grainAmount: 5, grainSize: 0.7,
+    sharpenAmount: 15, sharpenRadius: 0.8,
+  }},
+  { name: 'Lomo Color 100', cat: 'Still Photo', data: {
+    temperature: 5, tint: 8, contrast: 28, highlights: -10, shadows: -5, blacks: -18,
+    saturation: 1.2, vibrance: 22,
+    splitShadowHue: 260, splitShadowSat: 20, splitHighlightHue: 50, splitHighlightSat: 15,
+    grainAmount: 20, grainSize: 1.3,
+    vignetteAmount: 35, vignetteMidpoint: 0.4, vignetteFeather: 0.4,
+  }},
+
+  // ── DISCONTINUED STOCKS ──
+  ...gaugeVariants('Vision2 500T', { cat: 'Discontinued', data: {
+    temperature: -10, tint: -3, contrast: 12, highlights: -12, shadows: 18, blacks: -12,
+    saturation: 0.85, vibrance: 5,
+    splitShadowHue: 215, splitShadowSat: 18, splitHighlightHue: 42, splitHighlightSat: 12, splitBalance: -12,
+    vignetteAmount: 8, vignetteMidpoint: 0.5, vignetteFeather: 0.55,
+    sharpenAmount: -5, sharpenRadius: 1.2,
+  }}, ['16mm','35mm']),
+
+  ...gaugeVariants('Vision2 250D', { cat: 'Discontinued', data: {
+    temperature: 10, tint: 3, contrast: 14, highlights: -8, shadows: 12, blacks: -8,
+    saturation: 0.9, vibrance: 8,
+    splitShadowHue: 32, splitShadowSat: 14, splitHighlightHue: 48, splitHighlightSat: 10, splitBalance: -8,
+    sharpenAmount: -3, sharpenRadius: 1.1,
+  }}, ['16mm','35mm']),
+
+  { name: 'Vision 500T 5279', cat: 'Discontinued', data: {
+    temperature: -12, tint: -4, contrast: 10, highlights: -15, shadows: 20, blacks: -15,
+    saturation: 0.82, vibrance: 3,
+    splitShadowHue: 220, splitShadowSat: 20, splitHighlightHue: 40, splitHighlightSat: 14, splitBalance: -18,
+    grainAmount: 18, grainSize: 1.2,
+  }},
+  { name: 'Vision 200T 5274', cat: 'Discontinued', data: {
+    temperature: -6, tint: -2, contrast: 15, highlights: -8, shadows: 14, blacks: -10,
+    saturation: 0.88, vibrance: 6,
+    splitShadowHue: 218, splitShadowSat: 15, splitHighlightHue: 42, splitHighlightSat: 10,
+    grainAmount: 14, grainSize: 1.1,
+  }},
+
+  { name: 'Eterna 500T', cat: 'Discontinued', data: {
+    temperature: -6, tint: 2, contrast: 8, highlights: -5, shadows: 12, whites: 3, blacks: -5,
+    saturation: 0.78, vibrance: 5,
+    splitShadowHue: 200, splitShadowSat: 10, splitHighlightHue: 48, splitHighlightSat: 6, splitBalance: -8,
+    grainAmount: 14, grainSize: 1.0,
+  }},
+  { name: 'Eterna 250D', cat: 'Discontinued', data: {
+    temperature: 3, tint: 3, contrast: 10, highlights: -3, shadows: 10, blacks: -5,
+    saturation: 0.8, vibrance: 6,
+    splitShadowHue: 195, splitShadowSat: 8, splitHighlightHue: 50, splitHighlightSat: 5,
+    grainAmount: 10, grainSize: 0.9,
+  }},
+  { name: 'Eterna Vivid 500T', cat: 'Discontinued', data: {
+    temperature: -5, tint: 3, contrast: 12, highlights: -5, shadows: 10, blacks: -8,
+    saturation: 0.92, vibrance: 12,
+    splitShadowHue: 205, splitShadowSat: 12, splitHighlightHue: 52, splitHighlightSat: 8,
+    grainAmount: 15, grainSize: 1.05,
+  }},
+
+  { name: 'EXR 500T 5298', cat: 'Discontinued', data: {
+    temperature: -8, tint: -2, contrast: 14, highlights: -10, shadows: 15, blacks: -12,
+    saturation: 0.85, vibrance: 4,
+    splitShadowHue: 225, splitShadowSat: 18, splitHighlightHue: 38, splitHighlightSat: 12, splitBalance: -15,
+    grainAmount: 20, grainSize: 1.3,
+  }},
+  { name: 'EXR 50D 5245', cat: 'Discontinued', data: {
+    temperature: 6, tint: 1, contrast: 16, highlights: -5, shadows: 8, blacks: -6,
+    saturation: 0.95, vibrance: 10,
+    splitShadowHue: 28, splitShadowSat: 10, splitHighlightHue: 44, splitHighlightSat: 6,
+    grainAmount: 8, grainSize: 0.85,
+  }},
+
+  // ── REVERSAL / SLIDE ──
+  { name: 'Ektachrome E-6', cat: 'Reversal', data: {
+    temperature: 2, tint: 2, contrast: 20, highlights: -5, shadows: -8, whites: -5, blacks: -15,
+    saturation: 1.08, vibrance: 15,
+    splitShadowHue: 240, splitShadowSat: 5, splitHighlightHue: 55, splitHighlightSat: 3,
+    grainAmount: 8, grainSize: 0.8, sharpenAmount: 12, sharpenRadius: 0.8,
+  }},
+  { name: 'Velvia 50', cat: 'Reversal', data: {
+    temperature: 0, tint: 3, contrast: 25, highlights: -8, shadows: -12, whites: -8, blacks: -20,
+    saturation: 1.35, vibrance: 30,
+    splitShadowHue: 250, splitShadowSat: 5, splitHighlightHue: 50, splitHighlightSat: 3,
+    grainAmount: 5, grainSize: 0.6, sharpenAmount: 18, sharpenRadius: 0.7,
+  }},
+  { name: 'Velvia 100', cat: 'Reversal', data: {
+    temperature: 1, tint: 3, contrast: 22, highlights: -6, shadows: -10, whites: -6, blacks: -18,
+    saturation: 1.3, vibrance: 28,
+    splitShadowHue: 248, splitShadowSat: 4, splitHighlightHue: 52, splitHighlightSat: 3,
+    grainAmount: 6, grainSize: 0.65, sharpenAmount: 15, sharpenRadius: 0.75,
+  }},
+  { name: 'Provia 100F', cat: 'Reversal', data: {
+    temperature: 0, tint: 1, contrast: 18, highlights: -3, shadows: -5, whites: -3, blacks: -12,
+    saturation: 1.05, vibrance: 12,
+    grainAmount: 5, grainSize: 0.6, sharpenAmount: 12, sharpenRadius: 0.8,
+  }},
+  { name: 'Instax Color', cat: 'Reversal', data: {
+    temperature: 3, tint: 5, contrast: 12, highlights: 5, shadows: 5, whites: 8, blacks: -5,
+    saturation: 0.92, vibrance: 15,
+    splitShadowHue: 200, splitShadowSat: 12, splitHighlightHue: 55, splitHighlightSat: 8,
+    vignetteAmount: 20, vignetteMidpoint: 0.4, vignetteFeather: 0.35, vignetteRoundness: 0.3,
+  }},
+
+  // ── BLACK & WHITE ──
+  { name: 'Tri-X 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 20, highlights: -8, shadows: 15, whites: -5, blacks: -12,
+    grainAmount: 22, grainSize: 1.1, sharpenAmount: 15, sharpenRadius: 1.0,
+    splitShadowHue: 40, splitShadowSat: 3, splitHighlightHue: 50, splitHighlightSat: 2,
+  }},
+  { name: 'HP5 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 16, highlights: -5, shadows: 18, whites: -3, blacks: -8,
+    grainAmount: 20, grainSize: 1.15, sharpenAmount: 10, sharpenRadius: 1.1,
+    splitShadowHue: 35, splitShadowSat: 3, splitHighlightHue: 48, splitHighlightSat: 2,
+  }},
+  { name: 'T-MAX 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 22, highlights: -10, shadows: 12, blacks: -10,
+    grainAmount: 14, grainSize: 0.9, sharpenAmount: 20, sharpenRadius: 0.9,
+  }},
+  { name: 'T-MAX 100', cat: 'B&W', data: {
+    saturation: 0, contrast: 18, highlights: -5, shadows: 8, blacks: -8,
+    grainAmount: 6, grainSize: 0.7, sharpenAmount: 20, sharpenRadius: 0.8,
+  }},
+  { name: 'T-MAX 3200', cat: 'B&W', data: {
+    saturation: 0, contrast: 18, highlights: -12, shadows: 20, blacks: -15,
+    grainAmount: 45, grainSize: 1.8, sharpenAmount: 5, sharpenRadius: 1.2,
+  }},
+  { name: 'Delta 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 18, highlights: -6, shadows: 14, blacks: -10,
+    grainAmount: 16, grainSize: 1.0, sharpenAmount: 15, sharpenRadius: 0.9,
+  }},
+  { name: 'Delta 3200', cat: 'B&W', data: {
+    saturation: 0, contrast: 15, highlights: -10, shadows: 22, blacks: -18,
+    grainAmount: 42, grainSize: 1.7, sharpenAmount: 3, sharpenRadius: 1.3,
+  }},
+  { name: 'FP4 125', cat: 'B&W', data: {
+    saturation: 0, contrast: 20, highlights: -3, shadows: 6, blacks: -6,
+    grainAmount: 6, grainSize: 0.7, sharpenAmount: 20, sharpenRadius: 0.8,
+  }},
+  { name: 'Acros 100II', cat: 'B&W', data: {
+    saturation: 0, contrast: 20, highlights: -4, shadows: 5, blacks: -8,
+    grainAmount: 5, grainSize: 0.65, sharpenAmount: 22, sharpenRadius: 0.75,
+  }},
+  { name: 'Fomapan 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 14, highlights: -5, shadows: 18, whites: -5, blacks: -10,
+    grainAmount: 28, grainSize: 1.4, sharpenAmount: 8, sharpenRadius: 1.1,
+    splitShadowHue: 40, splitShadowSat: 5, splitHighlightHue: 45, splitHighlightSat: 3,
+  }},
+  { name: 'StreetPan 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 28, highlights: -12, shadows: 10, blacks: -20,
+    grainAmount: 25, grainSize: 1.3, sharpenAmount: 18, sharpenRadius: 1.0,
+  }},
+  { name: 'Holga 400', cat: 'B&W', data: {
+    saturation: 0, contrast: 10, highlights: -3, shadows: 15, blacks: -5,
+    grainAmount: 30, grainSize: 1.6, sharpenAmount: -15, sharpenRadius: 1.5,
+    vignetteAmount: 50, vignetteMidpoint: 0.35, vignetteFeather: 0.35, vignetteRoundness: 0.4,
+  }},
+  { name: 'Instax Mono', cat: 'B&W', data: {
+    saturation: 0, contrast: 15, highlights: 5, shadows: 8, whites: 8, blacks: -5,
+    grainAmount: 8, grainSize: 0.8,
+    splitShadowHue: 30, splitShadowSat: 5, splitHighlightHue: 50, splitHighlightSat: 3,
+    vignetteAmount: 18, vignetteMidpoint: 0.4, vignetteFeather: 0.35, vignetteRoundness: 0.3,
+  }},
+
+  // ── RETRO / STYLIZED ──
+  { name: 'Ektachrome C41', cat: 'Stylized', data: {
+    temperature: -8, tint: 12, contrast: 22, highlights: -10, shadows: -8, blacks: -15,
+    saturation: 1.15, vibrance: 20,
+    splitShadowHue: 270, splitShadowSat: 25, splitHighlightHue: 60, splitHighlightSat: 18,
+    grainAmount: 18, grainSize: 1.2,
+    vignetteAmount: 12, vignetteMidpoint: 0.5, vignetteFeather: 0.5,
+  }},
+  { name: 'Redscale XR', cat: 'Stylized', data: {
+    temperature: 35, tint: 10, contrast: 20, highlights: -10, shadows: 5, blacks: -12,
+    saturation: 1.0, vibrance: 10,
+    splitShadowHue: 15, splitShadowSat: 30, splitHighlightHue: 40, splitHighlightSat: 25,
+    grainAmount: 22, grainSize: 1.3,
+    vignetteAmount: 20, vignetteMidpoint: 0.45, vignetteFeather: 0.4,
+  }},
+  { name: 'Metropolis XR', cat: 'Stylized', data: {
+    temperature: -5, tint: 3, contrast: 15, highlights: -5, shadows: 10, blacks: -8,
+    saturation: 0.6, vibrance: -5,
+    splitShadowHue: 200, splitShadowSat: 15, splitHighlightHue: 45, splitHighlightSat: 8,
+    grainAmount: 15, grainSize: 1.1,
+  }},
+  { name: 'Expired Film', cat: 'Stylized', data: {
+    temperature: 12, tint: 8, contrast: 8, highlights: -5, shadows: 20, whites: -3, blacks: -5,
+    saturation: 0.75, vibrance: -5,
+    splitShadowHue: 45, splitShadowSat: 22, splitHighlightHue: 55, splitHighlightSat: 15, splitBalance: -20,
+    grainAmount: 30, grainSize: 1.5,
+    vignetteAmount: 15, vignetteMidpoint: 0.45, vignetteFeather: 0.45,
+  }},
+
+  // ── LOOKS (Clean, Idealized, Full) ──
+  { name: 'Clean Commercial', cat: 'Looks', data: {
+    temperature: 2, tint: 1, contrast: 8, highlights: -3, shadows: 3, blacks: -3,
+    saturation: 0.95, vibrance: 8,
+    grainAmount: 3, grainSize: 0.6, sharpenAmount: 12, sharpenRadius: 0.8,
+  }},
+  { name: 'Idealized 35mm', cat: 'Looks', data: {
+    temperature: 5, tint: 2, contrast: 12, highlights: -5, shadows: 8, blacks: -6,
+    saturation: 0.92, vibrance: 10,
+    splitShadowHue: 30, splitShadowSat: 8, splitHighlightHue: 45, splitHighlightSat: 5,
+    grainAmount: 8, grainSize: 0.9, sharpenAmount: -3, sharpenRadius: 1.0,
+  }},
+  { name: 'Full 35mm Print', cat: 'Looks', data: {
+    temperature: 8, tint: 3, contrast: 15, highlights: -8, shadows: 12, whites: -5, blacks: -10,
+    saturation: 0.9, vibrance: 8,
+    splitShadowHue: 32, splitShadowSat: 15, splitHighlightHue: 45, splitHighlightSat: 10, splitBalance: -10,
+    grainAmount: 14, grainSize: 1.0, sharpenAmount: -5, sharpenRadius: 1.2,
+    vignetteAmount: 8, vignetteMidpoint: 0.55, vignetteFeather: 0.6,
+  }},
+  { name: 'Full 16mm', cat: 'Looks', data: {
+    temperature: 8, tint: 3, contrast: 15, highlights: -8, shadows: 12, whites: -5, blacks: -10,
+    saturation: 0.9, vibrance: 8,
+    splitShadowHue: 32, splitShadowSat: 15, splitHighlightHue: 45, splitHighlightSat: 10, splitBalance: -10,
+    grainAmount: 30, grainSize: 1.6, sharpenAmount: -8, sharpenRadius: 1.4,
+    vignetteAmount: 15, vignetteMidpoint: 0.5, vignetteFeather: 0.5,
+  }},
+  { name: 'Full 8mm', cat: 'Looks', data: {
+    temperature: 10, tint: 5, contrast: 12, highlights: -10, shadows: 15, whites: -8, blacks: -8,
+    saturation: 0.85, vibrance: 5,
+    splitShadowHue: 35, splitShadowSat: 20, splitHighlightHue: 48, splitHighlightSat: 15, splitBalance: -15,
+    grainAmount: 55, grainSize: 2.2, sharpenAmount: -12, sharpenRadius: 1.8,
+    vignetteAmount: 30, vignetteMidpoint: 0.4, vignetteFeather: 0.4, vignetteRoundness: 0.4,
+  }},
+  { name: 'Super 8 Home Movie', cat: 'Looks', data: {
+    temperature: 18, tint: 8, contrast: 8, highlights: -5, shadows: 20, whites: -3, blacks: -3,
+    saturation: 0.75, vibrance: -5,
+    splitShadowHue: 40, splitShadowSat: 25, splitHighlightHue: 55, splitHighlightSat: 18, splitBalance: -20,
+    grainAmount: 60, grainSize: 2.5, sharpenAmount: -15, sharpenRadius: 2.0,
+    vignetteAmount: 40, vignetteMidpoint: 0.35, vignetteFeather: 0.35, vignetteRoundness: 0.35,
+  }},
+];
+
+let activePresetCategory = 'All';
+
+function renderPresets() {
+  // Categories
+  const cats = ['All', ...new Set(FILM_STOCKS.map(s => s.cat)), 'Custom'];
+  const catBar = document.getElementById('presetCategories');
+  catBar.innerHTML = '';
+  cats.forEach(cat => {
+    const btn = document.createElement('button');
+    btn.textContent = cat;
+    if (cat === activePresetCategory) btn.classList.add('active');
+    btn.onclick = () => { activePresetCategory = cat; renderPresets(); };
+    catBar.appendChild(btn);
+  });
+
+  // Grid
+  const grid = document.getElementById('presetGrid');
+  grid.innerHTML = '';
+  const userPresets = getPresets();
+
+  // Filter stocks
+  let stocks = activePresetCategory === 'All' ? FILM_STOCKS :
+               activePresetCategory === 'Custom' ? [] :
+               FILM_STOCKS.filter(s => s.cat === activePresetCategory);
+
+  stocks.forEach(stock => {
+    const item = document.createElement('div');
+    item.className = 'preset-item';
+    item.innerHTML = `<div class="name">${stock.name}</div><div class="meta">${stock.cat}</div>${stock.gauge ? '<div class="gauge">' + stock.gauge + '</div>' : ''}`;
+    item.onclick = () => applyPreset(stock.data);
+    grid.appendChild(item);
+  });
+
+  // Custom presets
+  if (activePresetCategory === 'All' || activePresetCategory === 'Custom') {
+    userPresets.forEach((preset, idx) => {
+      const item = document.createElement('div');
+      item.className = 'preset-item';
+      item.innerHTML = `<div class="name">${preset.name}</div><div class="meta">Custom</div><button class="delete-preset">✕</button>`;
+      item.querySelector('.name').onclick = () => applyPreset(preset.data);
+      item.querySelector('.delete-preset').onclick = (e) => { e.stopPropagation(); const p = getPresets(); p.splice(idx, 1); savePresets(p); renderPresets(); };
+      grid.appendChild(item);
+    });
+  }
+}
+
+function applyPreset(data) {
+  // Reset active layer to defaults first, then apply preset
+  PRESET_KEYS.forEach(k => {
+    if (k === 'saturation') state[k] = 1.0;
+    else if (k === 'hslHueWidth') state[k] = 30;
+    else if (k === 'hslSoftness') state[k] = 20;
+    else if (k === 'hslSatMax' || k === 'hslLumMax') state[k] = 1;
+    else if (k === 'splitShadowHue') state[k] = 220;
+    else if (k === 'splitHighlightHue') state[k] = 40;
+    else if (k === 'vignetteMidpoint' || k === 'vignetteRoundness' || k === 'vignetteFeather') state[k] = 0.5;
+    else if (k === 'grainSize' || k === 'sharpenRadius') state[k] = 1.0;
+    else state[k] = 0;
+  });
+  // Apply preset data (Proxy auto-syncs to active layer)
+  Object.keys(data).forEach(k => { state[k] = data[k]; });
+  // Update all slider UIs to match
+  syncAllSliders();
+  updateCurveLUT(); drawCurveEditor(); drawAllWheels();
+  pushUndo();
+}
+
+function syncAllSliders() {
+  document.querySelectorAll('#panel-basic input[type=range]').forEach(i => {
+    const p = i.dataset.param, sc = parseFloat(i.dataset.scale || '1');
+    i.value = state[p] / sc; i.nextElementSibling.textContent = sc < 1 ? state[p].toFixed(2) : Math.round(state[p] / sc).toString();
+  });
+  document.querySelectorAll('[data-hsl]').forEach(i => {
+    const p = i.dataset.hsl;
+    if (p.includes('Sat') && p !== 'hslSatAdjust' || p.includes('Lum') && p !== 'hslLumAdjust') i.value = state[p] * 100;
+    else if (p === 'hslSatAdjust' || p === 'hslLumAdjust') i.value = state[p] * 100;
+    else i.value = state[p];
+    const v = i.nextElementSibling;
+    if (p.includes('Hue') || p === 'hslHueShift') v.textContent = Math.round(parseFloat(i.value)) + '°';
+    else v.textContent = Math.round(parseFloat(i.value)).toString();
+  });
+  document.querySelectorAll('[data-fx]').forEach(i => {
+    const p = i.dataset.fx;
+    if (p === 'vignetteMidpoint' || p === 'vignetteRoundness' || p === 'vignetteFeather') i.value = state[p] * 100;
+    else if (p === 'grainSize' || p === 'sharpenRadius') i.value = state[p] * 100;
+    else i.value = state[p];
+    const v = i.nextElementSibling;
+    if (p.includes('Hue')) v.textContent = Math.round(parseFloat(i.value)) + '°';
+    else if (p === 'grainSize' || p === 'sharpenRadius') v.textContent = state[p].toFixed(1);
+    else v.textContent = Math.round(parseFloat(i.value)).toString();
+  });
+  document.querySelectorAll('[data-wheel]').forEach(i => { const prefix = i.dataset.wheel.replace('-master',''); i.value = state[prefix+'Master'] * 100; document.getElementById(prefix+'Val').textContent = state[prefix+'Master'].toFixed(2); });
+}
+
+document.getElementById('presetSaveBtn').onclick = () => {
+  const name = document.getElementById('presetNameInput').value.trim();
+  if (!name) return;
+  const data = {};
+  PRESET_KEYS.forEach(k => { data[k] = state[k]; });
+  data.curves = JSON.parse(JSON.stringify(state.curves));
+  const presets = getPresets();
+  presets.push({ name, data });
+  savePresets(presets);
+  document.getElementById('presetNameInput').value = '';
+  renderPresets();
+};
+
+// ═══════════════════════════════════════════
+// Export
+// ═══════════════════════════════════════════
+let selectedExportFormat = 'mp4-high';
+let exportCancelled = false;
+
+// Format sheet
+document.getElementById('exportBtn').onclick = () => {
+  if (!state.videoLoaded) return;
+  document.getElementById('exportFormatSheet').classList.add('show');
+  document.getElementById('exportBackdrop').classList.add('show');
+};
+document.getElementById('exportBackdrop').onclick = () => {
+  document.getElementById('exportFormatSheet').classList.remove('show');
+  document.getElementById('exportBackdrop').classList.remove('show');
+};
+document.querySelectorAll('.format-option').forEach(opt => {
+  opt.onclick = () => {
+    document.querySelectorAll('.format-option').forEach(o => { o.classList.remove('selected'); o.querySelector('.fmt-check').style.display = 'none'; });
+    opt.classList.add('selected'); opt.querySelector('.fmt-check').style.display = '';
+    selectedExportFormat = opt.dataset.format;
+  };
+});
+document.getElementById('exportCancelBtn').onclick = () => { exportCancelled = true; };
+
+document.getElementById('exportConfirmBtn').onclick = async () => {
+  document.getElementById('exportFormatSheet').classList.remove('show');
+  document.getElementById('exportBackdrop').classList.remove('show');
+  if (!state.videoLoaded) return;
+  exportCancelled = false;
+
+  const overlay = document.getElementById('exportOverlay'); overlay.classList.add('show');
+  const pf = document.getElementById('exportProgress'), pt = document.getElementById('exportText');
+
+  // Check if MediaRecorder is available (not on iOS Safari)
+  const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+  const useWebM = selectedExportFormat === 'webm-high' && hasMediaRecorder;
+
+  if (useWebM || (hasMediaRecorder && selectedExportFormat.startsWith('mp4'))) {
+    // Try MediaRecorder approach (Chrome, Firefox, etc.)
+    try {
+      await exportWithMediaRecorder(pf, pt);
+    } catch (e) {
+      // Fallback to frame-by-frame
+      pt.textContent = 'Switching to frame export...';
+      await exportFrameByFrame(pf, pt);
+    }
+  } else {
+    // iOS Safari fallback: frame-by-frame export
+    await exportFrameByFrame(pf, pt);
+  }
+};
+
+async function exportWithMediaRecorder(pf, pt) {
+  const overlay = document.getElementById('exportOverlay');
+  const stream = canvas.captureStream(30); const chunks = [];
+  const bitrate = selectedExportFormat === 'mp4-high' ? 50000000 : 20000000;
+  let mimeType = 'video/webm';
+  if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) mimeType = 'video/webm;codecs=vp9';
+
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    recorder.onstop = () => {
+      if (done) return; done = true;
+      const ext = selectedExportFormat.startsWith('mp4') ? 'mp4' : 'webm';
+      const blob = new Blob(chunks, { type: recorder.mimeType });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `GradeCam_export.${ext}`;
+      a.click();
+      pf.style.width = '100%'; pt.textContent = 'Done! Saved to downloads.';
+      setTimeout(() => overlay.classList.remove('show'), 1500);
+      resolve();
+    };
+    recorder.onerror = reject;
+
+    video.currentTime = 0;
+    seekAndWait(0).then(() => {
+      recorder.start();
+      video.play();
+
+      const ci = setInterval(() => {
+        if (exportCancelled) {
+          clearInterval(ci); recorder.stop(); video.pause();
+          document.getElementById('playPause').textContent = '▶';
+          overlay.classList.remove('show');
+          return;
+        }
+        const pct = (video.currentTime / video.duration) * 100;
+        pf.style.width = pct + '%'; pt.textContent = `Exporting... ${Math.round(pct)}%`;
+      }, 100);
+
+      video.onended = () => {
+        clearInterval(ci); recorder.stop(); video.pause();
+        document.getElementById('playPause').textContent = '▶';
+      };
+    });
+  });
+}
+
+async function exportFrameByFrame(pf, pt) {
+  // iOS Safari compatible: render each frame to canvas, capture as images, zip
+  // For simplicity on mobile: render frames, then download as individual PNG sequence
+  // OR better: play video slowly and capture canvas screenshots
+
+  const overlay = document.getElementById('exportOverlay');
+  const fps = 24;
+  const totalFrames = Math.floor(video.duration * fps);
+  const frameDuration = 1 / fps;
+
+  pt.textContent = 'Preparing frames...';
+
+  // Collect frames as blobs
+  const frameBlobs = [];
+  video.pause();
+
+  for (let i = 0; i < totalFrames; i++) {
+    if (exportCancelled) { overlay.classList.remove('show'); return; }
+    const targetTime = i * frameDuration;
+    await seekAndWait(targetTime);
+    // Wait for render
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.95));
+    frameBlobs.push(blob);
+
+    const pct = ((i + 1) / totalFrames) * 100;
+    pf.style.width = pct + '%';
+    pt.textContent = `Exporting frame ${i + 1}/${totalFrames} (${Math.round(pct)}%)`;
+  }
+
+  // Download as a single merged video if possible, otherwise offer frames
+  // For iOS: create a simple download of the processed video by re-encoding
+  // Best mobile approach: just save individual graded screenshots
+  pt.textContent = 'Creating download...';
+
+  // Try to use the original video approach: play + save the canvas output
+  // On iOS, we offer the graded video as a re-played capture
+  if (frameBlobs.length > 0) {
+    // For iOS: offer as a JPEG zip or single frame
+    // Most practical: offer download of the current graded frame as a high-res image
+    // OR: use the MediaRecorder if available for the actual video
+    const lastFrame = frameBlobs[frameBlobs.length - 1];
+    const url = URL.createObjectURL(lastFrame);
+
+    // Actually, for a real export on iOS Safari (no MediaRecorder), 
+    // the best approach is to just play the video and let the user screen-record,
+    // OR use a Web Worker + ffmpeg.wasm. For now, offer frame download.
+    pt.textContent = `Rendered ${totalFrames} frames. Downloading video...`;
+
+    // Try one more time with MediaRecorder (some iOS versions support it)
+    if (typeof MediaRecorder !== 'undefined') {
+      try {
+        video.currentTime = 0;
+        await seekAndWait(0);
+        const stream = canvas.captureStream(fps);
+        const chunks = [];
+        const recorder = new MediaRecorder(stream, { videoBitsPerSecond: 20000000 });
+        recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+        await new Promise((resolve) => {
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: recorder.mimeType || 'video/mp4' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'GradeCam_export.mp4';
+            a.click();
+            resolve();
+          };
+          recorder.start();
+          video.play();
+          video.onended = () => { recorder.stop(); video.pause(); };
+        });
+        pf.style.width = '100%'; pt.textContent = 'Done! Saved to downloads.';
+        setTimeout(() => overlay.classList.remove('show'), 1500);
+        return;
+      } catch(e) { /* fallback below */ }
+    }
+
+    // Ultimate fallback: download the best frame
+    const a = document.createElement('a');
+    a.href = url; a.download = 'GradeCam_graded_frame.jpg'; a.click();
+    pf.style.width = '100%';
+    pt.textContent = 'Video export not supported on this browser. Frame saved.';
+    setTimeout(() => overlay.classList.remove('show'), 3000);
+  }
+};
+
+// ═══════════════════════════════════════════
+// Layer UI
+// ═══════════════════════════════════════════
+function renderLayersList() {
+  const list = document.getElementById('layersList');
+  if (!list) return;
+  list.innerHTML = '';
+  state.layers.forEach((layer, i) => {
+    const row = document.createElement('div');
+    row.className = 'layer-row' + (i === state.activeLayerIndex ? ' active' : '');
+    row.innerHTML = `
+      <div class="layer-dot"></div>
+      <span class="layer-name" data-idx="${i}">${layer.name}</span>
+      <button class="layer-btn eye${layer.enabled ? '' : ' off'}" data-action="eye" data-idx="${i}">${layer.enabled ? '👁' : '—'}</button>
+      <button class="layer-btn solo${layer.solo ? ' on' : ''}" data-action="solo" data-idx="${i}">S</button>
+      <input type="range" class="layer-opacity" min="0" max="100" value="${Math.round(layer.opacity * 100)}" data-action="opacity" data-idx="${i}">
+      <span class="layer-opacity-val">${Math.round(layer.opacity * 100)}%</span>
+      <div class="layer-arrows">
+        <button data-action="up" data-idx="${i}">▲</button>
+        <button data-action="down" data-idx="${i}">▼</button>
+      </div>
+      ${i > 0 ? '<button class="layer-delete" data-action="delete" data-idx="' + i + '">✕</button>' : ''}
+    `;
+    // Select layer on name click
+    row.querySelector('.layer-name').addEventListener('click', () => {
+      loadLayerToState(i);
+    });
+    // Double-click to rename
+    row.querySelector('.layer-name').addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const nameEl = e.target;
+      const input = document.createElement('input');
+      input.className = 'layer-name-input';
+      input.value = layer.name;
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+      const finish = () => {
+        const newName = input.value.trim() || layer.name;
+        layer.name = newName;
+        if (i === state.activeLayerIndex) document.getElementById('layerBadge').textContent = newName;
+        renderLayersList();
+      };
+      input.addEventListener('blur', finish);
+      input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') finish(); });
+    });
+    // Eye toggle
+    row.querySelector('[data-action="eye"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      layer.enabled = !layer.enabled;
+      renderLayersList();
+    });
+    // Solo toggle
+    row.querySelector('[data-action="solo"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      layer.solo = !layer.solo;
+      renderLayersList();
+    });
+    // Opacity
+    row.querySelector('[data-action="opacity"]').addEventListener('input', (e) => {
+      e.stopPropagation();
+      layer.opacity = parseInt(e.target.value) / 100;
+      row.querySelector('.layer-opacity-val').textContent = e.target.value + '%';
+    });
+    // Up/Down
+    row.querySelector('[data-action="up"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (i === 0) return;
+      [state.layers[i], state.layers[i-1]] = [state.layers[i-1], state.layers[i]];
+      if (state.activeLayerIndex === i) state.activeLayerIndex = i - 1;
+      else if (state.activeLayerIndex === i - 1) state.activeLayerIndex = i;
+      renderLayersList();
+    });
+    row.querySelector('[data-action="down"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (i >= state.layers.length - 1) return;
+      [state.layers[i], state.layers[i+1]] = [state.layers[i+1], state.layers[i]];
+      if (state.activeLayerIndex === i) state.activeLayerIndex = i + 1;
+      else if (state.activeLayerIndex === i + 1) state.activeLayerIndex = i;
+      renderLayersList();
+    });
+    // Delete
+    const delBtn = row.querySelector('[data-action="delete"]');
+    if (delBtn) {
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.layers.splice(i, 1);
+        if (state.activeLayerIndex >= state.layers.length) state.activeLayerIndex = state.layers.length - 1;
+        if (state.activeLayerIndex === i || state.activeLayerIndex >= i) {
+          loadLayerToState(Math.min(state.activeLayerIndex, state.layers.length - 1));
+        }
+        renderLayersList();
+        pushUndo();
+      });
+    }
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('addLayerBtn').addEventListener('click', () => {
+  const num = state.layers.length;
+  const layer = createDefaultLayerData('Secondary ' + num);
+  state.layers.push(layer);
+  loadLayerToState(state.layers.length - 1);
+  pushUndo();
+});
+
+// ═══════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════
+initWebGL();
+
+// Initialize default layer
+const primaryLayer = createDefaultLayerData('Primary');
+state.layers.push(primaryLayer);
+state.activeLayerIndex = 0;
+// Sync initial state to primary layer
+LAYER_PARAMS.forEach(k => { primaryLayer[k] = state[k]; });
+primaryLayer.curves = JSON.parse(JSON.stringify(state.curves));
+// Init mask texture data
+updateMaskTexture();
+
+drawCurveEditor(); drawAllWheels(); updateHueIndicator(); renderLayersList(); render();
+</script>
+</body>
+</html>
